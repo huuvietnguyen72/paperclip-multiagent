@@ -5,6 +5,8 @@ const BOARD_ROUTE_ROOTS = new Set([
   "skills",
   "teams-catalog",
   "org",
+  "office",
+  "analytics",
   "agents",
   "chats",
   "apps",

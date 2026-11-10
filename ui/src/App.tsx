@@ -140,6 +140,8 @@ const ProductionRoutineDetail = lazy(() => import("./pages/RoutineDetail.product
 const ProductionCompanySkills = lazy(() => import("./pages/CompanySkills.production").then((module) => ({ default: module.CompanySkills })));
 const ProductionCompanyActivity = lazy(() => import("./pages/audit/CompanyActivity.production").then((module) => ({ default: module.CompanyActivity })));
 const ProductionOrgChart = lazy(() => import("./pages/OrgChart.production").then((module) => ({ default: module.OrgChart })));
+const Office = lazy(() => import("./pages/Office"));
+const Analytics = lazy(() => import("./pages/Analytics"));
 
 function ProductionSurface({ children }: { children: ReactNode }) {
   return <Suspense fallback={<PaperclipLoading />}>{children}</Suspense>;
@@ -281,6 +283,8 @@ function boardRoutes(streamlinedUiEnabled: boolean, combinedInboxTasksEnabled: b
         path="org"
         element={streamlinedUiEnabled ? <Navigate to="/agents/all" replace /> : <ProductionSurface><ProductionOrgChart /></ProductionSurface>}
       />
+      <Route path="office" element={<ProductionSurface><Office /></ProductionSurface>} />
+      <Route path="analytics" element={<ProductionSurface><Analytics /></ProductionSurface>} />
       <Route path="agents" element={<Navigate to="/agents/all" replace />} />
       {AGENT_FILTER_TABS.map((tab) => (
         <Route
@@ -810,6 +814,8 @@ export function App() {
           <Route path="instance/settings/*" element={<LegacySettingsRedirect />} />
           <Route path="companies" element={<UnprefixedBoardRedirect />} />
           <Route path="issues" element={<UnprefixedBoardRedirect />} />
+          <Route path="office" element={<UnprefixedBoardRedirect />} />
+          <Route path="analytics" element={<UnprefixedBoardRedirect />} />
           <Route path="tasks" element={<UnprefixedBoardRedirect />} />
           <Route path="issues/:issueId" element={<UnprefixedBoardRedirect />} />
           <Route path="routines" element={<UnprefixedBoardRedirect />} />

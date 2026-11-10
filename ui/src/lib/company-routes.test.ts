@@ -154,3 +154,12 @@ describe("company routes", () => {
     expect(applyCompanyPrefix("/PAP/artifacts", "PAP")).toBe("/PAP/artifacts");
   });
 });
+
+describe("office route", () => {
+  it("is a board route that gets the company prefix", () => {
+    expect(applyCompanyPrefix("/office", "QUA")).toBe("/QUA/office");
+    expect(isBoardPathWithoutPrefix("/office")).toBe(true);
+    expect(extractCompanyPrefixFromPath("/office")).toBeNull();
+    expect(applyCompanyPrefix("/analytics", "QUA")).toBe("/QUA/analytics");
+  });
+});
