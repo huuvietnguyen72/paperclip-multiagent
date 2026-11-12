@@ -21,14 +21,10 @@ import { strings } from "@/lib/model-fallback/strings";
 import { cn } from "@/lib/utils";
 import { DialogError, FieldRow, ModelSelect, errorMessage, useModelOptions } from "./fields";
 
-/** Types that cannot be added yet: the Anthropic-compatible endpoint needs a secret-reference picker. */
-const COMING_SOON: ReadonlySet<AddConnectionKind> = new Set(["anthropicCompatible"]);
-
 const MARK_FOR_KIND: Record<AddConnectionKind, string> = {
   opencodeGo: "opencode_local",
   claudeAccount: "claude_local",
   codex: "codex_local",
-  anthropicCompatible: "claude_local",
 };
 
 export interface AddConnectionDialogProps {
@@ -55,7 +51,7 @@ export function AddConnectionDialog({ agent, companyId, onClose, save }: AddConn
   const needsAccount = kind === "claudeAccount";
   const accountProblem = needsAccount && (!binding || sameBinding(binding, defaultBinding));
   const full = !canAddConnection(agent);
-  const ready = kind !== null && !COMING_SOON.has(kind) && Boolean(effectiveModel) && !accountProblem && !full;
+  const ready = kind !== null && Boolean(effectiveModel) && !accountProblem && !full;
 
   const selectKind = (next: AddConnectionKind) => {
     setKind(next);
@@ -117,29 +113,21 @@ export function AddConnectionDialog({ agent, companyId, onClose, save }: AddConn
             <div className="grid gap-2">
               {ADD_KIND_ORDER.map((candidate) => {
                 const copy = strings.addDialog.types[candidate];
-                const soon = COMING_SOON.has(candidate);
                 return (
                   <button
                     key={candidate}
                     type="button"
-                    disabled={soon}
                     aria-pressed={kind === candidate}
                     onClick={() => selectKind(candidate)}
                     className={cn(
                       "flex items-start gap-3 rounded-lg border bg-card p-3 text-left text-card-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring",
                       kind === candidate && "border-ring bg-accent",
-                      soon && "cursor-not-allowed opacity-60",
                     )}
                   >
                     <AdapterMark type={MARK_FOR_KIND[candidate]} className="mt-0.5 size-5 shrink-0" />
                     <span className="min-w-0 flex-1">
                       <span className="flex items-center gap-2 text-sm font-medium">
                         {copy.label}
-                        {soon ? (
-                          <span className="rounded-full bg-muted px-2 py-0.5 text-xs font-normal text-muted-foreground">
-                            {strings.addDialog.comingSoon}
-                          </span>
-                        ) : null}
                       </span>
                       <span className="block text-xs text-muted-foreground">{copy.description}</span>
                     </span>
@@ -166,7 +154,7 @@ export function AddConnectionDialog({ agent, companyId, onClose, save }: AddConn
             </FieldRow>
           ) : null}
 
-          {kind && !COMING_SOON.has(kind) ? (
+          {kind ? (
             <ModelSelect options={options} value={effectiveModel} onChange={setModel} />
           ) : null}
           {full ? <p className="text-xs text-muted-foreground">{strings.addDialog.limitReached}</p> : null}

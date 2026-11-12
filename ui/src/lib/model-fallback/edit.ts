@@ -117,9 +117,9 @@ export function addConnectionBody(agent: ChainAgent, connection: ModelFallbackCo
   return { runtimeConfig: withFallback(agent, { ...fallback, connections: [...fallback.connections, connection] }) };
 }
 
-export type AddConnectionKind = "opencodeGo" | "claudeAccount" | "codex" | "anthropicCompatible";
+export type AddConnectionKind = "opencodeGo" | "claudeAccount" | "codex";
 
-export const ADD_KIND_ORDER: readonly AddConnectionKind[] = ["opencodeGo", "claudeAccount", "codex", "anthropicCompatible"];
+export const ADD_KIND_ORDER: readonly AddConnectionKind[] = ["opencodeGo", "claudeAccount", "codex"];
 
 export function adapterTypeForKind(kind: AddConnectionKind): ModelFallbackConnection["adapterType"] {
   if (kind === "opencodeGo") return "opencode_local";

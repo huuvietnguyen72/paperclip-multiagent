@@ -99,13 +99,8 @@ export const strings = Object.freeze({
       opencodeGo: Object.freeze({ label: "OpenCode Go", description: "Dùng tài khoản OpenCode Go đã đăng nhập · GLM, DeepSeek, Kimi, Qwen" }),
       claudeAccount: Object.freeze({ label: "Tài khoản Claude khác", description: "Claude Code với một kết nối AI Anthropic khác trong Paperclip" }),
       codex: Object.freeze({ label: "Codex (OpenAI)", description: "Codex CLI đã đăng nhập" }),
-      anthropicCompatible: Object.freeze({
-        label: "Endpoint tương thích Anthropic",
-        description: "Claude Code + base URL & key lưu trong Secrets (vd. Z.ai GLM)",
-      }),
     }),
     typeLabel: "Loại kết nối",
-    comingSoon: "Sắp có",
     sameAccount: "Chọn một tài khoản khác với tài khoản mặc định.",
     limitReached: "Đã đạt tối đa 10 kết nối dự phòng.",
     testConnection: "Kiểm tra kết nối",

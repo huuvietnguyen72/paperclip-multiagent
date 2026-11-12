@@ -172,12 +172,14 @@ describe("model fallback editing", () => {
     await act(async () => root.unmount());
   });
 
-  it("ships the Anthropic-compatible type disabled with the Sắp có tag", async () => {
+  it("lists exactly three connection types in order", async () => {
     const root = await render();
     await act(async () => buttonByText("Thêm tài khoản / provider").click());
-    const card = buttonByText("Endpoint tương thích Anthropic");
-    expect(card.disabled).toBe(true);
-    expect(card.textContent).toContain("Sắp có");
+    const labels = Array.from(document.body.querySelectorAll("button[aria-pressed]")).map(
+      (b) => b.querySelector("span.font-medium")?.textContent?.trim(),
+    );
+    expect(labels).toEqual(["OpenCode Go", "Tài khoản Claude khác", "Codex (OpenAI)"]);
+    expect(document.body.textContent).not.toContain("Sắp có");
     await act(async () => root.unmount());
   });
 
