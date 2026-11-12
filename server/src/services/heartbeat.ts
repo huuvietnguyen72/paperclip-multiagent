@@ -2092,7 +2092,6 @@ export function heartbeatService(
       }
       const runtime = await timePreparation("runtime_state", () => ensureRuntimeState(agent));
       const context = parseObject(run.contextSnapshot);
-      dropCrossAdapterResumeSession(context, loadedAgent.adapterType, agent.adapterType);
       const authorizeFailedChatRetryExecution = () =>
         db.transaction((tx) =>
           authorizeFailedChatRunRetryWake(db, tx as unknown as Db, {
@@ -2582,6 +2581,7 @@ export function heartbeatService(
         delete context.executionContinuation;
         delete context.paperclipContinuationSummary;
       }
+      dropCrossAdapterResumeSession(context, loadedAgent.adapterType, agent.adapterType);
       const taskSessionDecodedParams = normalizeSessionParams(
         sessionCodec.deserialize(context.workspaceSelectionChanged ? null : taskSession?.sessionParamsJson ?? null),
       );

@@ -199,13 +199,15 @@ describe("heartbeat start order (ruling P4)", () => {
     expect(applied).toBeLessThan(startup.indexOf("getTaskSession("));
     // A removed fallback connection still fails the unchanged claimed-adapter check (new admission on next wake).
     expect(startup).toContain("const selectedAdapter = claimedAdapterType(run);");
-    // Cross-adapter explicit resume data is dropped as soon as the run context is read, before any resume read.
-    const contextRead = startup.indexOf("const context = parseObject(run.contextSnapshot);");
+    // Cross-adapter explicit resume data is dropped next to the conversation drop: after the failed-chat-retry
+    // authorization (which rejects contexts carrying resume keys) and before the explicit resume read.
+    const authorized = startup.indexOf("const isFailedChatRunRetry = await authorizeFailedChatRetryExecution();");
     const dropped = startup.indexOf("dropCrossAdapterResumeSession(context, loadedAgent.adapterType, agent.adapterType)");
-    expect(contextRead).toBeGreaterThan(0);
-    expect(dropped).toBeGreaterThan(contextRead);
-    expect(dropped).toBeLessThan(startup.indexOf("context.resumeSessionParams"));
-    expect(dropped).toBeLessThan(startup.indexOf("authorizeFailedChatRetryExecution"));
+    const resumeRead = startup.indexOf("sessionCodec.deserialize(parseObject(context.resumeSessionParams))");
+    expect(authorized).toBeGreaterThan(0);
+    expect(dropped).toBeGreaterThan(authorized);
+    expect(resumeRead).toBeGreaterThan(dropped);
+    expect(resumeRead - dropped).toBeLessThan(600);
   });
 });
 
