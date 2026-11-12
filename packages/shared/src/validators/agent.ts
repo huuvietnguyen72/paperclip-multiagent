@@ -7,6 +7,7 @@ import {
   INBOX_MINE_ISSUE_STATUS_FILTER,
 } from "../constants.js";
 import { agentAdapterTypeSchema } from "../adapter-type.js";
+import { modelFallbackConfigSchema } from "../model-fallback.js";
 import { envConfigSchema } from "./secret.js";
 import { trustAuthorizationPolicySchema, trustPresetSchema } from "./trust-policy.js";
 import { agentDesiredSkillSelectionSchema } from "./adapter-skills.js";
@@ -71,6 +72,7 @@ export const createAgentInstructionsBundleSchema = z.object({
 
 export const agentRuntimeConfigSchema = z.object({
   aiConnection: aiConnectionBindingSchema.optional(),
+  modelFallback: modelFallbackConfigSchema.optional(),
   debug: z.object({
     providerTrace: z.literal("raw").optional(),
   }).strict().optional(),
