@@ -22,7 +22,7 @@ export function validateModelFallbackPatch(input: {
     if (!MODEL_FALLBACK_ADAPTER_TYPES.includes(connection.adapterType)) {
       return `${position}: adapter type ${connection.adapterType} is not supported for model fallback (use ${MODEL_FALLBACK_ADAPTER_TYPES.join(", ")})`;
     }
-    if (connection.aiConnection
+    if (connection.aiConnection && connection.aiConnection.mode !== "router"
       && !isAiConnectionCompatible(connection.aiConnection, connection.adapterType, connection.adapterConfig.model)) {
       return `${position}: the AI connection is not compatible with ${connection.adapterType} and model ${String(connection.adapterConfig.model)}`;
     }
