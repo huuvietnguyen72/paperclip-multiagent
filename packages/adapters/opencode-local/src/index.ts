@@ -105,6 +105,7 @@ Core fields:
 Operational fields:
 - timeoutSec (number, optional): run timeout in seconds
 - graceSec (number, optional): SIGTERM grace period in seconds
+- usageLimitWatchdogSec (number, optional): local runs only; after this many seconds without output, Paperclip checks OpenCode's log for a "Go usage limit exceeded" error on the run's session and, only on a match, stops the run as a provider_quota failure so model fallback can take over (default 300; 0 disables)
 
 Notes:
 - OpenCode supports multiple providers and models. Use \

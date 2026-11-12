@@ -65,6 +65,15 @@ import { apiKeyBillingType } from "@paperclipai/adapter-utils/api-billing-type";
 import { prepareOpenCodeRuntimeConfig, prepareManagedOpenCodeRemoteHomes } from "./runtime-config.js";
 import { SANDBOX_INSTALL_COMMAND } from "../index.js";
 import { resolveOpenCodeSkillsHome } from "./skills.js";
+import {
+  OPENCODE_USAGE_LIMIT_ERROR_MESSAGE,
+  readOpenCodeLogTail,
+  resolveOpenCodeLogPath,
+  resolveUsageLimitWatchdogSec,
+  startUsageLimitWatchdog,
+  terminateLocalOpenCodeRun,
+  type UsageLimitMatch,
+} from "./usage-limit-watchdog.js";
 
 const __moduleDir = path.dirname(fileURLToPath(import.meta.url));
 
@@ -638,6 +647,8 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
 
     // Remote targets receive only the prepared environment, never host keys.
     const accountingEnv = executionTargetIsRemote ? preparedRuntimeConfig.env : runtimeEnv;
+    // Local-only: a sandbox or SSH run writes its OpenCode log on another machine.
+    const usageLimitWatchdogSec = resolveUsageLimitWatchdogSec(config, executionTargetIsRemote);
     const runAttempt = async (resumeSessionId: string | null) => {
       await hydrateFreshSessionHandoff(ctx, { resumedSession: Boolean(resumeSessionId) });
       const { basePrompt, promptMetrics } = buildPrompt(Boolean(resumeSessionId));
@@ -670,23 +681,58 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
           costStatus: parsed.usageComplete || parsed.costUsd != null ? undefined : "unpriced",
           usageBasis: "per_run", provider, biller: resolveOpenCodeBiller(accountingEnv, provider), billingType: apiKeyBillingType(provider, accountingEnv), model, complete: false };
       });
-      const proc = await runAdapterExecutionTargetProcess(runId, runtimeExecutionTarget, command, args, {
-        onProcessStopped: providerStop.beginInvocation(),
-        // Keep a long sandbox run off the synchronous command HTTP request.
-        // Probes and preparation keep their existing execution paths.
-        ...(runtimeExecutionTarget?.kind === "remote" && runtimeExecutionTarget.transport === "sandbox"
-          && runtimeExecutionTarget.providerKey === "daytona" ? { useSession: true } : {}),
-        cwd,
-        env: preparedRuntimeConfig.env,
-        stdin: prompt,
-        timeoutSec,
-        graceSec,
-        onSpawn,
-        onRuntimeProgress: ctx.onRuntimeProgress,
-        onLog: accountingLog,
-        runLogTail: paperclipBridge?.runLogTail,
-        settleRunDisposition: paperclipBridge?.settleRunDisposition,
-      });
+      // A Go usage-limit error makes `opencode run` hang silently; only
+      // OpenCode's own log records it. After a long silence, check that log for
+      // this run's session and stop the run only on a positive match.
+      const openCodeLogPath = resolveOpenCodeLogPath({ ...process.env, ...preparedRuntimeConfig.env });
+      const usageLimitKill = { cancel: () => {} };
+      const usageLimitWatchdog = usageLimitWatchdogSec > 0
+        ? startUsageLimitWatchdog({
+          thresholdSec: usageLimitWatchdogSec,
+          readLogTail: () => readOpenCodeLogTail(openCodeLogPath),
+          kill: () => { usageLimitKill.cancel = terminateLocalOpenCodeRun(runId, graceSec); },
+          onWarn: (message) => console.warn(`[opencode-local] run ${runId}: ${message}`),
+        })
+        : null;
+      const processOnLog = usageLimitWatchdog
+        ? async (stream: "stdout" | "stderr", chunk: string) => {
+          usageLimitWatchdog.noteOutput(stream, chunk);
+          await accountingLog(stream, chunk);
+        }
+        : accountingLog;
+      let proc: Awaited<ReturnType<typeof runAdapterExecutionTargetProcess>>;
+      try {
+        proc = await runAdapterExecutionTargetProcess(runId, runtimeExecutionTarget, command, args, {
+          onProcessStopped: providerStop.beginInvocation(),
+          // Keep a long sandbox run off the synchronous command HTTP request.
+          // Probes and preparation keep their existing execution paths.
+          ...(runtimeExecutionTarget?.kind === "remote" && runtimeExecutionTarget.transport === "sandbox"
+            && runtimeExecutionTarget.providerKey === "daytona" ? { useSession: true } : {}),
+          cwd,
+          env: preparedRuntimeConfig.env,
+          stdin: prompt,
+          timeoutSec,
+          graceSec,
+          onSpawn,
+          onRuntimeProgress: ctx.onRuntimeProgress,
+          onLog: processOnLog,
+          runLogTail: paperclipBridge?.runLogTail,
+          settleRunDisposition: paperclipBridge?.settleRunDisposition,
+        });
+      } finally {
+        usageLimitWatchdog?.stop();
+        usageLimitKill.cancel();
+      }
+      const usageLimitMatch = usageLimitWatchdog?.detected() ?? null;
+      const usageLimit: { match: UsageLimitMatch; sessionId: string } | null = usageLimitMatch
+        ? { match: usageLimitMatch, sessionId: usageLimitWatchdog?.sessionId() ?? "" }
+        : null;
+      if (usageLimit) {
+        await onLog(
+          "stderr",
+          `[paperclip] OpenCode produced no output for ${usageLimitWatchdogSec}s and its log reports a Go usage limit for session ${usageLimit.sessionId}; stopped the run as a provider usage-limit failure.\n`,
+        );
+      }
       // Parse any unterminated final record before deciding whether its usage
       // is complete. A clean exit alone cannot turn absent counters into zero.
       await accountingLog.flush();
@@ -703,7 +749,7 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
         parsed.usageComplete = retained.usageComplete;
         parsed.costUsd = retained.costUsd;
       }
-      return { proc, rawStderr: proc.stderr, parsed };
+      return { proc, rawStderr: proc.stderr, parsed, usageLimit };
     };
 
     const toResult = (
@@ -711,9 +757,38 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
         proc: { exitCode: number | null; signal: string | null; timedOut: boolean; stdout: string; stderr: string; errorCode?: string | null };
         rawStderr: string;
         parsed: ReturnType<typeof parseOpenCodeJsonl>;
+        usageLimit?: { match: UsageLimitMatch; sessionId: string } | null;
       },
       clearSessionOnMissingSession = false,
     ): AdapterExecutionResult => {
+      if (attempt.usageLimit) {
+        // The watchdog stopped a run that OpenCode left hanging on a Go usage
+        // limit. Report it like the claude/codex adapters report provider
+        // quota, so run completion records the quota failure and model
+        // fallback can move the agent. The log has no reset time; the server
+        // keeps its default backoff (or the agent's noResetWaitMinutes).
+        const base = toResult(
+          { ...attempt, usageLimit: null, proc: { ...attempt.proc, timedOut: false } },
+          clearSessionOnMissingSession,
+        );
+        return {
+          ...base,
+          timedOut: false,
+          usageComplete: false,
+          errorMessage: OPENCODE_USAGE_LIMIT_ERROR_MESSAGE,
+          errorCode: "provider_quota",
+          errorFamily: "provider_quota",
+          resultJson: {
+            ...(base.resultJson ?? {}),
+            errorFamily: "provider_quota",
+            usageLimitWatchdog: {
+              sessionId: attempt.usageLimit.sessionId,
+              logTimestamp: attempt.usageLimit.match.at.toISOString(),
+              silenceSec: usageLimitWatchdogSec,
+            },
+          },
+        };
+      }
       if (attempt.proc.timedOut) {
         return {
           exitCode: attempt.proc.exitCode,
@@ -804,6 +879,7 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
       if (
         sessionId &&
         initialFailed &&
+        !initial.usageLimit &&
         isOpenCodeUnknownSessionError(initial.proc.stdout, initial.rawStderr)
       ) {
         await onLog(
