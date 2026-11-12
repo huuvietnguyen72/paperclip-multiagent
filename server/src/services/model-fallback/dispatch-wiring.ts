@@ -1,7 +1,8 @@
 import { MODEL_FALLBACK_RETRY_REASON, type ModelFallbackDispatchRecord } from "@paperclipai/shared";
 import { logger } from "../../middleware/logger.js";
+import { routedRuntimeKeys } from "../ai-connection-router.js";
 import { executionRetryAttemptCount } from "../execution-recovery-attempt.js";
-import { buildChain } from "./policy.js";
+import { buildChain, readDispatchRecord } from "./policy.js";
 import type { AgentRow, createModelFallbackService, HeartbeatRunRow, ModelFallbackDispatchResult } from "./service.js";
 
 /**
@@ -53,19 +54,47 @@ export async function adapterDispatchForClaim(
   }
 }
 
+type ClaimedRun = { runnerProfileJson: unknown; scheduledRetryReason?: string | null };
+
 /**
- * Explicit-resume session data is resolved against the agent's configured adapter (and a switch retry copies the
- * failed run's context), so a run dispatched to a different adapter must not be handed that session.
+ * Ruling P9b. Explicit-resume session data belongs to the account that wrote it (and a switch retry copies the failed
+ * run's context), so it is dropped whenever this run's account may differ from that one: a different adapter, a
+ * fallback connection (even another account on the same harness), a model fallback switch retry, or a claim that
+ * returned to the default.
  */
-export function dropCrossAdapterResumeSession(
+export function dropForeignAccountResumeSession(
   context: Record<string, unknown>,
+  run: ClaimedRun,
   configuredAdapterType: string,
   dispatchedAdapterType: string,
 ): void {
-  if (configuredAdapterType === dispatchedAdapterType) return;
+  const record = readDispatchRecord(run);
+  const accountMayDiffer = configuredAdapterType !== dispatchedAdapterType
+    || record?.isFallback === true
+    || record?.kind === "return"
+    || run.scheduledRetryReason === MODEL_FALLBACK_RETRY_REASON;
+  if (!accountMayDiffer) return;
   delete context.resumeSessionParams;
   delete context.resumeSessionDisplayId;
   delete context.resumeFromRunId;
+}
+
+/**
+ * The issue's assignee overrides (the composer's model/effort picker) were chosen for the configured connection. On a
+ * fallback connection, or another harness, they would send e.g. a Claude model to OpenCode, so the model-family keys
+ * are dropped exactly as the router path drops them for a pool member; the other overrides still apply.
+ */
+export function dropFallbackIssueModelOverrides<T extends { adapterConfig: Record<string, unknown> | null }>(
+  overrides: T | null,
+  run: ClaimedRun,
+  configuredAdapterType: string,
+  dispatchedAdapterType: string,
+): T | null {
+  if (!overrides?.adapterConfig) return overrides;
+  const onFallback = configuredAdapterType !== dispatchedAdapterType || readDispatchRecord(run)?.isFallback === true;
+  if (!onFallback) return overrides;
+  const kept = Object.fromEntries(Object.entries(overrides.adapterConfig).filter(([key]) => !routedRuntimeKeys.has(key)));
+  return { ...overrides, adapterConfig: Object.keys(kept).length ? kept : null };
 }
 
 /**

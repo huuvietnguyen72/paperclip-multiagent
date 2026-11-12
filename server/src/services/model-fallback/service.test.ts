@@ -10,6 +10,7 @@ import { getEmbeddedPostgresTestSupport, startEmbeddedPostgresTestDatabase } fro
 import { forbidden } from "../../errors.js";
 import { aiConnectionConfigurationFailure } from "../ai-connection-configuration-failure.js";
 import { aiConnectionService } from "../ai-connections.js";
+import { deleteCompany } from "../company-deletion.js";
 import { buildChain } from "./policy.js";
 import { createModelFallbackService } from "./service.js";
 
@@ -165,7 +166,7 @@ describePostgres("model fallback service", () => {
     expect(result.adapterType).toBe("opencode_local");
     expect(result.kind).toBe("switch");
     expect(result.record).toEqual({ connectionId: s.fallbackId, accountKey: "login:opencode_local",
-      adapterType: "opencode_local", model: FALLBACK_MODEL, isFallback: true });
+      adapterType: "opencode_local", model: FALLBACK_MODEL, isFallback: true, kind: "switch" });
     const state = await s.state();
     expect(state?.activeConnectionId).toBe(s.fallbackId);
     expect(state?.pinnedIssueIds).toContain(s.issueId);
@@ -204,7 +205,7 @@ describePostgres("model fallback service", () => {
     const result = await service().selectForDispatch({ agent: await s.loadAgent(), run: await s.newRun(), responsibleUserId: null });
     expect(result.kind).toBe("return");
     expect(result.adapterType).toBe("claude_local");
-    expect(result.record).toMatchObject({ connectionId: "default", isFallback: false });
+    expect(result.record).toMatchObject({ connectionId: "default", isFallback: false, kind: "return" });
     expect(await s.actions("agent.model_fallback.returned")).toHaveLength(1);
     const state = await s.state();
     expect(state?.activeConnectionId).toBeNull();
@@ -293,6 +294,122 @@ describePostgres("model fallback service", () => {
     const returned = await service().selectForDispatch({ agent: await s.loadAgent(), run: await s.newRun(), responsibleUserId: null });
     expect(returned.kind).toBe("return");
   });
+
+  it("a switch retry pins its issue even when the agent is already on the fallback (rule 12)", async () => {
+    const s = await seed();
+    const secondIssueId = randomUUID();
+    await db.insert(issues).values({ id: secondIssueId, companyId: s.companyId, title: "Second task", status: "in_progress",
+      assigneeAgentId: s.agentId, identifier: `${s.identifier}c` });
+    // Both default runs fail before either switch retry is claimed: no state row exists yet, so no failure pin.
+    const secondRun = await s.newRun(s.agentId, secondIssueId);
+    await service().recordQuotaFailure({ run: await s.failQuota(s.defaultRecord), agent: await s.loadAgent() });
+    await db.update(heartbeatRuns).set({ status: "failed", errorCode: "provider_quota", error: "Claude usage limit reached",
+      resultJson: { message: "You've hit your limit · resets 20:00 (UTC)" },
+      runnerProfileJson: { adapterDispatch: { modelFallback: s.defaultRecord } } }).where(eq(heartbeatRuns.id, secondRun.id));
+    await service().recordQuotaFailure({ run: await s.loadRun(secondRun.id), agent: await s.loadAgent() });
+    expect(await s.state()).toBeNull();
+
+    const switchRetry = async (issueId: string) => {
+      const run = await s.newRun(s.agentId, issueId);
+      await db.update(heartbeatRuns).set({ scheduledRetryReason: "model_fallback_switch", scheduledRetryAttempt: 1 })
+        .where(eq(heartbeatRuns.id, run.id));
+      return service().selectForDispatch({ agent: await s.loadAgent(), run: await s.loadRun(run.id), responsibleUserId: null });
+    };
+    expect((await switchRetry(s.issueId)).kind).toBe("switch");
+    expect((await switchRetry(secondIssueId)).kind).toBe("stay");
+    expect((await s.state())?.pinnedIssueIds).toEqual([s.issueId, secondIssueId]);
+
+    await db.update(modelAccountExhaustions).set({ exhaustedUntil: new Date(clock.getTime() - 60_000) })
+      .where(eq(modelAccountExhaustions.companyId, s.companyId));
+    await db.update(issues).set({ status: "done" }).where(eq(issues.id, s.issueId));
+    expect((await service().selectForDispatch({ agent: await s.loadAgent(), run: await s.newRun(), responsibleUserId: null })).kind)
+      .toBe("stay");
+    await db.update(issues).set({ status: "done" }).where(eq(issues.id, secondIssueId));
+    expect((await service().selectForDispatch({ agent: await s.loadAgent(), run: await s.newRun(), responsibleUserId: null })).kind)
+      .toBe("return");
+  });
+
+  it("an unresolvable default key with a usable fallback stays on the default (ruling P10)", async () => {
+    const s = await seed();
+    const unresolvedDefault = createModelFallbackService(db, { now: () => clock,
+      resolveAccountConnectionId: async ({ entry }) => (entry.id === "default" ? null : resolveAccountConnectionId({ entry })) });
+    const result = await unresolvedDefault.selectForDispatch({ agent: await s.loadAgent(), run: await s.loadRun(), responsibleUserId: null });
+    expect(result.adapterType).toBe("claude_local");
+    expect(result.kind).toBe("default");
+    expect(result.record).toMatchObject({ connectionId: "default", accountKey: null, isFallback: false });
+    expect(await s.state()).toBeNull();
+    expect(await s.actions("agent.model_fallback.switched")).toHaveLength(0);
+  });
+
+  it("a responsible_user default does not flap between runs with and without a user", async () => {
+    const s = await seed();
+    const agent = await s.loadAgent();
+    const runtimeConfig = { ...(agent.runtimeConfig as Record<string, unknown>),
+      aiConnection: { provider: "anthropic", method: "subscription", mode: "responsible_user" } };
+    await db.update(agents).set({ runtimeConfig }).where(eq(agents.id, s.agentId));
+    // Like select(): a responsible_user binding resolves only when the run names its user.
+    const perUser = createModelFallbackService(db, { now: () => clock,
+      resolveAccountConnectionId: async ({ entry, responsibleUserId }) =>
+        (entry.id === "default" ? (responsibleUserId ? s.connectionId : null) : resolveAccountConnectionId({ entry })) });
+    for (const responsibleUserId of [null, "user-1", null, "user-1"]) {
+      const result = await perUser.selectForDispatch({ agent: await s.loadAgent(), run: await s.newRun(), responsibleUserId });
+      expect(result.adapterType).toBe("claude_local");
+      expect(result.kind).toBe("default");
+    }
+    expect(await s.state()).toBeNull();
+    expect(await s.actions("agent.model_fallback.switched")).toHaveLength(0);
+  });
+
+  it("disabling automatic switching while on a fallback returns to the default and clears the state", async () => {
+    const s = await seed();
+    await switchToFallback(s);
+    const agent = await s.loadAgent();
+    const runtimeConfig = agent.runtimeConfig as { modelFallback: Record<string, unknown> };
+    await db.update(agents).set({ runtimeConfig: { ...runtimeConfig, modelFallback: { ...runtimeConfig.modelFallback, enabled: false } } })
+      .where(eq(agents.id, s.agentId));
+
+    // Before any dispatch, the tab already shows the default in use.
+    const disabledView = await service().readAgentView({ companyId: s.companyId, agentId: s.agentId, now: clock });
+    expect(disabledView.enabled).toBe(false);
+    expect(disabledView.active).toEqual({ connectionId: "default", since: null, reason: null });
+    expect(disabledView.connections.find((connection) => connection.id === s.fallbackId)?.inUse).toBe(false);
+
+    const result = await service().selectForDispatch({ agent: await s.loadAgent(), run: await s.newRun(), responsibleUserId: null });
+    expect(result.adapterType).toBe("claude_local");
+    expect(result.kind).toBe("return");
+    expect(result.record).toMatchObject({ connectionId: "default", isFallback: false, kind: "return" });
+    const state = await s.state();
+    expect(state).toMatchObject({ activeConnectionId: null, pinnedIssueIds: [], switchedAt: null, reason: null });
+    const returned = await s.actions("agent.model_fallback.returned");
+    expect(returned).toHaveLength(1);
+    expect(returned[0]!.details).toMatchObject({ from: s.fallbackId, to: "default", reason: "disabled", issueId: s.issueId });
+    expect((await s.systemComments()).map((comment) => comment.body)).toContain(
+      `OpenCode Go · ${FALLBACK_MODEL} → quay về Claude Code · ${DEFAULT_MODEL} (mặc định).`,
+    );
+
+    // A second dispatch has nothing to clear; re-enabling does not resume the old fallback.
+    const again = await service().selectForDispatch({ agent: await s.loadAgent(), run: await s.newRun(), responsibleUserId: null });
+    expect(again).toMatchObject({ kind: "legacy", record: null });
+    expect(await s.actions("agent.model_fallback.returned")).toHaveLength(1);
+    await db.update(agents).set({ runtimeConfig }).where(eq(agents.id, s.agentId));
+    await db.update(modelAccountExhaustions).set({ exhaustedUntil: new Date(clock.getTime() - 60_000) })
+      .where(eq(modelAccountExhaustions.companyId, s.companyId));
+    const reenabled = await service().selectForDispatch({ agent: await s.loadAgent(), run: await s.newRun(), responsibleUserId: null });
+    expect(reenabled.kind).toBe("default");
+    expect(reenabled.adapterType).toBe("claude_local");
+  });
+
+  it("company deletion removes the fallback state and account exhaustion rows", async () => {
+    const s = await seed();
+    await switchToFallback(s);
+    expect(await s.state()).not.toBeNull();
+    expect(await s.exhaustions()).toHaveLength(1);
+    await db.update(agents).set({ lifecycleState: "terminated", status: "terminated" }).where(eq(agents.companyId, s.companyId));
+    expect(await deleteCompany(db, s.companyId)).toMatchObject({ id: s.companyId });
+    expect(await db.select().from(modelAccountExhaustions).where(eq(modelAccountExhaustions.companyId, s.companyId))).toEqual([]);
+    expect(await db.select().from(agentModelFallbackStates).where(eq(agentModelFallbackStates.companyId, s.companyId))).toEqual([]);
+    expect(await db.select().from(companies).where(eq(companies.id, s.companyId))).toEqual([]);
+  }, 60_000);
 
   it("an unparsed failure does not shorten a parsed reset that is still ahead", async () => {
     const s = await seed();

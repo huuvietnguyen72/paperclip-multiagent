@@ -21,7 +21,8 @@ import * as dispatchWiring from "./dispatch-wiring.js";
 import {
   adapterDispatchForClaim,
   adapterDispatchJson,
-  dropCrossAdapterResumeSession,
+  dropFallbackIssueModelOverrides,
+  dropForeignAccountResumeSession,
   MODEL_FALLBACK_SELECTION_FAILED_MESSAGE,
   modelFallbackSwitchRetry,
 } from "./dispatch-wiring.js";
@@ -96,7 +97,7 @@ describe("applyModelFallbackDispatch", () => {
   });
 });
 
-describe("dropCrossAdapterResumeSession", () => {
+describe("dropForeignAccountResumeSession (ruling P9b)", () => {
   function resumeContext() {
     return {
       issueId: "issue-1",
@@ -105,19 +106,73 @@ describe("dropCrossAdapterResumeSession", () => {
       resumeSessionParams: { sessionId: "claude-session", cwd: "/work" },
     };
   }
+  const defaultRecord = (kind: ModelFallbackDispatchRecord["kind"]) =>
+    fallbackRecord({ connectionId: "default", accountKey: "ai:own", adapterType: "claude_local", model: "claude-sonnet-5-5", isFallback: false, kind });
+  const drop = (run: { runnerProfileJson: unknown; scheduledRetryReason?: string | null }, dispatchedAdapterType = "claude_local") => {
+    const context: Record<string, unknown> = resumeContext();
+    dropForeignAccountResumeSession(context, run, "claude_local", dispatchedAdapterType);
+    return context;
+  };
 
   it("a fallback record plus resumeSessionParams in the context must not reach the fallback adapter", () => {
-    const { agent: runAgent } = applyModelFallbackDispatch(configuredAgent, claimedRun(fallbackRecord()));
-    const context: Record<string, unknown> = resumeContext();
-    dropCrossAdapterResumeSession(context, configuredAgent.adapterType, runAgent.adapterType);
+    const run = claimedRun(fallbackRecord());
+    const { agent: runAgent } = applyModelFallbackDispatch(configuredAgent, run);
     expect(runAgent.adapterType).toBe("opencode_local");
-    expect(context).toEqual({ issueId: "issue-1" });
+    expect(drop(run, runAgent.adapterType)).toEqual({ issueId: "issue-1" });
   });
 
-  it("keeps an explicit resume on the agent's own adapter", () => {
-    const context: Record<string, unknown> = resumeContext();
-    dropCrossAdapterResumeSession(context, "claude_local", "claude_local");
-    expect(context).toEqual(resumeContext());
+  it("keeps an explicit resume on the agent's own connection", () => {
+    expect(drop(claimedRun(defaultRecord("default")))).toEqual(resumeContext());
+    expect(drop(claimedRun(defaultRecord("stay")))).toEqual(resumeContext());
+    expect(drop(claimedRun(null))).toEqual(resumeContext());
+    expect(drop({ ...claimedRun(null), scheduledRetryReason: "transient_failure" })).toEqual(resumeContext());
+  });
+
+  it("drops it on a same-adapter fallback (another Claude account)", () => {
+    const otherClaude = fallbackRecord({ accountKey: "ai:other", adapterType: "claude_local", model: "claude-sonnet-5-5", kind: "switch" });
+    expect(drop(claimedRun(otherClaude))).toEqual({ issueId: "issue-1" });
+    expect(drop(claimedRun({ ...otherClaude, kind: "stay" }))).toEqual({ issueId: "issue-1" });
+  });
+
+  it("drops it on a model fallback switch retry", () => {
+    expect(drop({ ...claimedRun(defaultRecord("default")), scheduledRetryReason: "model_fallback_switch" })).toEqual({ issueId: "issue-1" });
+    expect(drop({ ...claimedRun(null), scheduledRetryReason: "model_fallback_switch" })).toEqual({ issueId: "issue-1" });
+  });
+
+  it("drops it when the claim returned to the default", () => {
+    expect(drop(claimedRun(defaultRecord("return")))).toEqual({ issueId: "issue-1" });
+  });
+});
+
+describe("dropFallbackIssueModelOverrides", () => {
+  const issueOverrides = () => ({
+    adapterConfig: {
+      model: "claude-opus-5", effort: "high", modelReasoningEffort: "high", reasoningEffort: "high", variant: "max",
+      provider: "acpx", acpxAgent: "claude", workspaceStrategy: { type: "git_worktree" }, timeoutSec: 600,
+    },
+    useProjectWorkspace: true,
+  });
+  const kept = { adapterConfig: { workspaceStrategy: { type: "git_worktree" }, timeoutSec: 600 }, useProjectWorkspace: true };
+
+  it("drops the issue's model picks when the run is dispatched to another harness", () => {
+    expect(dropFallbackIssueModelOverrides(issueOverrides(), claimedRun(fallbackRecord()), "claude_local", "opencode_local")).toEqual(kept);
+  });
+
+  it("drops them on a same-harness fallback connection", () => {
+    const otherClaude = fallbackRecord({ accountKey: "ai:other", adapterType: "claude_local", model: "claude-sonnet-5-5" });
+    expect(dropFallbackIssueModelOverrides(issueOverrides(), claimedRun(otherClaude), "claude_local", "claude_local")).toEqual(kept);
+  });
+
+  it("keeps them on the configured connection", () => {
+    const own = fallbackRecord({ connectionId: "default", adapterType: "claude_local", isFallback: false, kind: "return" });
+    expect(dropFallbackIssueModelOverrides(issueOverrides(), claimedRun(own), "claude_local", "claude_local")).toEqual(issueOverrides());
+    expect(dropFallbackIssueModelOverrides(issueOverrides(), claimedRun(null), "claude_local", "claude_local")).toEqual(issueOverrides());
+    expect(dropFallbackIssueModelOverrides(null, claimedRun(fallbackRecord()), "claude_local", "opencode_local")).toBeNull();
+  });
+
+  it("leaves no adapterConfig when only model picks were set", () => {
+    expect(dropFallbackIssueModelOverrides({ adapterConfig: { model: "claude-opus-5" }, useProjectWorkspace: null },
+      claimedRun(fallbackRecord()), "claude_local", "opencode_local")).toEqual({ adapterConfig: null, useProjectWorkspace: null });
   });
 });
 
@@ -202,12 +257,26 @@ describe("heartbeat start order (ruling P4)", () => {
     // Cross-adapter explicit resume data is dropped next to the conversation drop: after the failed-chat-retry
     // authorization (which rejects contexts carrying resume keys) and before the explicit resume read.
     const authorized = startup.indexOf("const isFailedChatRunRetry = await authorizeFailedChatRetryExecution();");
-    const dropped = startup.indexOf("dropCrossAdapterResumeSession(context, loadedAgent.adapterType, agent.adapterType)");
+    const dropped = startup.indexOf("dropForeignAccountResumeSession(context, run, loadedAgent.adapterType, agent.adapterType)");
     const resumeRead = startup.indexOf("sessionCodec.deserialize(parseObject(context.resumeSessionParams))");
     expect(authorized).toBeGreaterThan(0);
     expect(dropped).toBeGreaterThan(authorized);
     expect(resumeRead).toBeGreaterThan(dropped);
     expect(resumeRead - dropped).toBeLessThan(600);
+  });
+
+  it("drops the issue's model picks before any reader of the issue overrides on a fallback run", async () => {
+    const source = await readFile(new URL("../heartbeat.ts", import.meta.url), "utf8");
+    const startup = source.slice(source.indexOf("let agent = loadedAgent;"));
+    const parsed = startup.indexOf("let issueAssigneeOverrides =");
+    const filtered = startup.indexOf(
+      "issueAssigneeOverrides = dropFallbackIssueModelOverrides(issueAssigneeOverrides, run, loadedAgent.adapterType, agent.adapterType);");
+    expect(parsed).toBeGreaterThan(0);
+    expect(filtered).toBeGreaterThan(parsed);
+    // Every later read (router overrides, the original copy, workspace config, session preparation) sees the filtered value.
+    const firstRead = startup.indexOf("issueAssigneeOverrides", parsed + "let issueAssigneeOverrides =".length);
+    expect(firstRead).toBe(filtered);
+    expect(startup.indexOf("const originalAiIssueOverrides = issueAssigneeOverrides;")).toBeGreaterThan(filtered);
   });
 });
 

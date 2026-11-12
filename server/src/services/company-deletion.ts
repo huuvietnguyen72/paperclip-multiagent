@@ -29,6 +29,8 @@ import {
   agentApiKeys,
   agentRuntimeState,
   agentTaskSessions,
+  agentModelFallbackStates,
+  modelAccountExhaustions,
   agentWakeupRequests,
   issues,
   issueComments,
@@ -110,6 +112,9 @@ export async function deleteCompany(db: Db, id: string) {
             .where(inArray(heartbeatRunEvents.runId, companyRunIds.map((run) => run.id)));
         }
         await tx.delete(agentTaskSessions).where(eq(agentTaskSessions.companyId, id));
+        // Model fallback rows reference the company without a cascade (exhaustions also reference runs).
+        await tx.delete(agentModelFallbackStates).where(eq(agentModelFallbackStates.companyId, id));
+        await tx.delete(modelAccountExhaustions).where(eq(modelAccountExhaustions.companyId, id));
         await tx.delete(activityLog).where(eq(activityLog.companyId, id));
         await tx.delete(runIdentityContexts).where(eq(runIdentityContexts.companyId, id));
         await notifyScheduledRetryCancellation(tx, { companyId: id });

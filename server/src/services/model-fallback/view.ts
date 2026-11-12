@@ -122,6 +122,7 @@ export async function readAgentModelFallbackView(
   if (!agent) throw notFound("Agent not found");
 
   const config = modelFallbackConfigSchema.safeParse(parseObject(agent.runtimeConfig).modelFallback);
+  const enabled = config.success ? config.data.enabled : false;
   const chain = configuredChain(agent);
   const startOfDay = new Date(now);
   startOfDay.setHours(0, 0, 0, 0);
@@ -150,7 +151,9 @@ export async function readAgentModelFallbackView(
   const keys = [...new Set(accountKeys.filter((key): key is string => key !== null))];
   const aiConnectionIds = keys.filter((key) => key.startsWith("ai:")).map((key) => key.slice(3));
 
-  const pinnedIssueIds = state?.pinnedIssueIds ?? [];
+  // While switching is off every run uses the default; a leftover state row (cleared at the next dispatch) is moot.
+  const heldState = enabled ? state : null;
+  const pinnedIssueIds = heldState?.pinnedIssueIds ?? [];
   const issueIds = new Set<string>(pinnedIssueIds);
   for (const run of runs) {
     const issueId = boundRunIssueId(run);
@@ -187,7 +190,8 @@ export async function readAgentModelFallbackView(
   const exhaustedUntil = new Map(exhaustionRows.map((row) => [row.accountKey, row.exhaustedUntil]));
   const issueById = new Map(issueRows.map((row) => [row.id, row]));
   const connectionNames = new Map(connectionRows.map((row) => [row.id, row.name]));
-  const activeIndex = state?.activeConnectionId ? chain.findIndex((entry) => entry.id === state.activeConnectionId) : -1;
+  const activeIndex = heldState?.activeConnectionId
+    ? chain.findIndex((entry) => entry.id === heldState.activeConnectionId) : -1;
   const activeId = chain[Math.max(0, activeIndex)]!.id;
   const chainIds = new Set(chain.map((entry) => entry.id));
   const connectionOfRun = (run: (typeof runs)[number]) => {
@@ -264,7 +268,7 @@ export async function readAgentModelFallbackView(
   timeline.sort((a, b) => Date.parse(b.at) - Date.parse(a.at));
 
   return {
-    enabled: config.success ? config.data.enabled : false,
+    enabled,
     noResetWaitMinutes: (config.success ? config.data.noResetWaitMinutes : undefined)
       ?? Math.round(PROVIDER_QUOTA_RECOVERY_DEFAULT_BACKOFF_MS / 60_000),
     active: {

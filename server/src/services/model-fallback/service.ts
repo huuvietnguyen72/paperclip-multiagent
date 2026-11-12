@@ -10,6 +10,7 @@ import {
 import {
   MODEL_FALLBACK_DEFAULT_CONNECTION_ID,
   MODEL_FALLBACK_FINISHED_ISSUE_STATUSES,
+  MODEL_FALLBACK_RETRY_REASON,
   aiConnectionBindingSchema,
   modelFallbackConfigSchema,
   type AgentModelFallbackView,
@@ -97,7 +98,12 @@ export function returnedComment(input: { fromLabel: string; toLabel: string }): 
 
 export { readDispatchRecord };
 
-function toRecord(chain: ChainEntry[], accountKeys: (string | null)[], index: number): ModelFallbackDispatchRecord {
+function toRecord(
+  chain: ChainEntry[],
+  accountKeys: (string | null)[],
+  index: number,
+  kind: ModelFallbackSelectionKind,
+): ModelFallbackDispatchRecord {
   const entry = chain[index]!;
   return {
     connectionId: entry.id,
@@ -105,7 +111,16 @@ function toRecord(chain: ChainEntry[], accountKeys: (string | null)[], index: nu
     adapterType: entry.adapterType,
     model: entryModel(entry),
     isFallback: index > 0,
+    kind,
   };
+}
+
+/** A configured fallback connection, read even while automatic switching is off (labels only). */
+function configuredConnection(agent: AgentRow, connectionId: string): Pick<ChainEntry, "adapterType" | "adapterConfig"> | null {
+  const raw = parseObject(parseObject(agent.runtimeConfig).modelFallback);
+  const parsed = modelFallbackConfigSchema.safeParse({ ...raw, enabled: true });
+  if (!parsed.success) return null;
+  return parsed.data.connections.find((connection) => connection.id === connectionId) ?? null;
 }
 
 type DbOrTx = Pick<Db, "select" | "insert" | "update">;
@@ -219,6 +234,67 @@ export function createModelFallbackService(db: Db, deps: ModelFallbackServiceDep
     }
   }
 
+  /**
+   * A default-only chain (switching disabled, chain removed, paperclip_runner) runs the default. A state row still
+   * holding a fallback is cleared here, with a "disabled" return, so the tab, header and Office agree with the runs
+   * and re-enabling never silently resumes the old fallback.
+   */
+  async function returnFromDefaultOnlyChain(agent: AgentRow, run: HeartbeatRunRow, chain: ChainEntry[]): Promise<ModelFallbackDispatchResult> {
+    const legacy: ModelFallbackDispatchResult = { adapterType: agent.adapterType, record: null, kind: "legacy", entry: null };
+    const scope = and(eq(agentModelFallbackStates.companyId, agent.companyId), eq(agentModelFallbackStates.agentId, agent.id));
+    const held = await db
+      .select({ activeConnectionId: agentModelFallbackStates.activeConnectionId })
+      .from(agentModelFallbackStates)
+      .where(and(scope, isNotNull(agentModelFallbackStates.activeConnectionId)))
+      .then((rows) => rows[0] ?? null);
+    if (!held) return legacy;
+
+    const at = now();
+    const runIssueId = boundRunIssueId(run);
+    const publications: ActivityPublication[] = [];
+    const comments: PendingComment[] = [];
+    const to = chain[0]!;
+    const returned = await db.transaction(async (tx) => {
+      const state = await tx.select().from(agentModelFallbackStates).where(scope).for("update").then((rows) => rows[0] ?? null);
+      if (!state?.activeConnectionId) return false;
+      await tx
+        .update(agentModelFallbackStates)
+        .set({ activeConnectionId: null, pinnedIssueIds: [], switchedAt: null, reason: null, updatedAt: at })
+        .where(and(scope, eq(agentModelFallbackStates.id, state.id)));
+      const from = configuredConnection(agent, state.activeConnectionId);
+      await logActivity(tx as unknown as Db, {
+        companyId: agent.companyId,
+        actorType: "system",
+        actorId: ACTIVITY_ACTOR_ID,
+        action: MODEL_FALLBACK_RETURNED_ACTION,
+        entityType: "agent",
+        entityId: agent.id,
+        agentId: agent.id,
+        runId: run.id,
+        issueId: runIssueId,
+        details: {
+          from: state.activeConnectionId, to: to.id, reason: "disabled",
+          fromAdapterType: from?.adapterType ?? null, fromModel: from ? entryModel(from) : null,
+          toAdapterType: to.adapterType, toModel: entryModel(to), issueId: runIssueId,
+        },
+      }, publications);
+      if (runIssueId) {
+        comments.push({
+          issueId: runIssueId,
+          runId: run.id,
+          body: returnedComment({ fromLabel: from ? connectionLabel(from) : "Kết nối dự phòng", toLabel: connectionLabel(to) }),
+          title: `Quay về ${connectionLabel(to)}`,
+        });
+      }
+      return true;
+    });
+    if (!returned) return legacy;
+    for (const publication of publications) publishActivity(publication);
+    await postComments(comments);
+    // The account is not resolved: a default-only chain keeps the legacy quota path (recordQuotaFailure needs a key).
+    return { adapterType: to.adapterType, record: toRecord(chain, [null], 0, "return"), kind: "return", entry: to };
+  }
+
   async function selectForDispatch(input: {
     agent: AgentRow;
     run: HeartbeatRunRow;
@@ -227,13 +303,17 @@ export function createModelFallbackService(db: Db, deps: ModelFallbackServiceDep
     const { agent, run } = input;
     const chain = buildChain(agent);
     // A run from another company or agent never moves this agent's state.
-    if (chain.length <= 1 || run.companyId !== agent.companyId || run.agentId !== agent.id) {
+    if (run.companyId !== agent.companyId || run.agentId !== agent.id) {
       return { adapterType: agent.adapterType, record: null, kind: "legacy", entry: null };
     }
+    if (chain.length <= 1) return returnFromDefaultOnlyChain(agent, run, chain);
 
     const at = now();
     const accountKeys = await chainAccountKeys(agent, chain, input.responsibleUserId);
     const runIssueId = boundRunIssueId(run);
+    // Rule 12: a switch retry's task failed on the account this agent switched away from, so it holds the agent on
+    // the fallback even when another run already switched it (two failures before either retry was claimed).
+    const isSwitchRetry = run.scheduledRetryReason === MODEL_FALLBACK_RETRY_REASON;
     const publications: ActivityPublication[] = [];
     const comments: PendingComment[] = [];
 
@@ -306,7 +386,9 @@ export function createModelFallbackService(db: Db, deps: ModelFallbackServiceDep
             title: `Quay về ${connectionLabel(to)}`,
           };
         } else if (kind === "stay") {
-          if (!pins.length && runIssueId) patch = { pinnedIssueIds: [runIssueId] };
+          if (runIssueId && !pins.includes(runIssueId) && (!pins.length || isSwitchRetry)) {
+            patch = { pinnedIssueIds: [...pins, runIssueId] };
+          }
         } else if (kind === "default" && activeConnectionId) {
           // The active fallback was removed from the chain; its config edit is already in the activity log.
           patch = { activeConnectionId: null, pinnedIssueIds: [], switchedAt: null, reason: null };
@@ -351,7 +433,7 @@ export function createModelFallbackService(db: Db, deps: ModelFallbackServiceDep
     for (const publication of publications) publishActivity(publication);
     await postComments(comments);
     const entry = chain[outcome.index]!;
-    return { adapterType: entry.adapterType, record: toRecord(chain, accountKeys, outcome.index), kind: outcome.kind, entry };
+    return { adapterType: entry.adapterType, record: toRecord(chain, accountKeys, outcome.index, outcome.kind), kind: outcome.kind, entry };
   }
 
   async function recordQuotaFailure(input: { run: HeartbeatRunRow; agent: AgentRow }): Promise<{ retryNow: boolean }> {

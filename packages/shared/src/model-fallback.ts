@@ -75,12 +75,17 @@ export type ModelFallbackConfig = {
   noResetWaitMinutes?: number;
 };
 
+/** The transition a claim's connection selection performed. */
+export type ModelFallbackSelectionKind = "default" | "stay" | "return" | "switch" | "all_exhausted";
+
 export interface ModelFallbackDispatchRecord {
   connectionId: string;
   accountKey: string | null;
   adapterType: string;
   model: string | null;
   isFallback: boolean;
+  /** The selection that produced this record; absent on records written before it was stored. */
+  kind?: ModelFallbackSelectionKind;
 }
 
 export interface AgentModelFallbackView {

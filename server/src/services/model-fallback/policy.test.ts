@@ -141,4 +141,18 @@ describe("selectConnection", () => {
   it("stale active id resolves to default", () => {
     expect(select({ activeConnectionId: "gone" })).toEqual({ index: 0, kind: "default" });
   });
+
+  it("an unresolvable default key never triggers a switch (ruling P10)", () => {
+    expect(select({ accountKeys: [null, "ai:b", "ai:c"] })).toEqual({ index: 0, kind: "default" });
+  });
+
+  it("an unresolvable default key still counts as usable for the return", () => {
+    expect(select({ accountKeys: [null, "ai:b", "ai:c"], activeConnectionId: "b", pinnedFinished: true }))
+      .toEqual({ index: 0, kind: "return" });
+  });
+
+  it("an unresolvable fallback key is still skipped when choosing a fallback", () => {
+    expect(select({ accountKeys: ["ai:a", null, "ai:c"], exhaustedUntil: new Map([["ai:a", later(1)]]) }))
+      .toEqual({ index: 2, kind: "switch" });
+  });
 });

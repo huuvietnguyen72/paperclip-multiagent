@@ -4,6 +4,7 @@ import {
   modelFallbackConfigSchema,
   type AiRuntimeConnectionBinding,
   type ModelFallbackDispatchRecord,
+  type ModelFallbackSelectionKind,
 } from "@paperclipai/shared";
 
 export type ChainEntry = {
@@ -13,7 +14,9 @@ export type ChainEntry = {
   aiConnection: AiRuntimeConnectionBinding | null;
 };
 
-export type ModelFallbackSelectionKind = "default" | "stay" | "return" | "switch" | "all_exhausted";
+export type { ModelFallbackSelectionKind };
+
+const SELECTION_KINDS: readonly ModelFallbackSelectionKind[] = ["default", "stay", "return", "switch", "all_exhausted"];
 
 type AgentLike = { adapterType: string; adapterConfig: unknown; runtimeConfig: unknown };
 
@@ -76,6 +79,7 @@ export function readDispatchRecord(run: { runnerProfileJson: unknown }): ModelFa
     adapterType: raw.adapterType,
     model: typeof raw.model === "string" ? raw.model : null,
     isFallback: raw.isFallback === true,
+    ...(SELECTION_KINDS.includes(raw.kind as ModelFallbackSelectionKind) ? { kind: raw.kind as ModelFallbackSelectionKind } : {}),
   };
 }
 
@@ -110,7 +114,11 @@ export function selectConnection(input: {
     const until = exhaustedUntil.get(key);
     return until !== undefined && until.getTime() > now.getTime();
   };
-  const usable = (index: number) => (accountKeys[index] ?? null) !== null && !isExhausted(index);
+  // Ruling P10: only exhaustion makes the default unusable. An unresolvable default key (a responsible_user binding
+  // without a user, a reconnect needed) dispatches the default as configured instead of switching; an unresolvable
+  // fallback key is still skipped when choosing a fallback.
+  const usable = (index: number) =>
+    (index === 0 || (accountKeys[index] ?? null) !== null) && !isExhausted(index);
 
   const foundIndex = activeConnectionId ? chain.findIndex((entry) => entry.id === activeConnectionId) : -1;
   const current = foundIndex < 0 ? 0 : foundIndex;

@@ -297,7 +297,7 @@ import {
 } from "./conversation-continuation.js";
 import { createModelFallbackService } from "./model-fallback/service.js";
 import { applyModelFallbackDispatch } from "./model-fallback/policy.js";
-import { dropCrossAdapterResumeSession, MODEL_FALLBACK_CONNECTION_REMOVED_MESSAGE } from "./model-fallback/dispatch-wiring.js";
+import { dropFallbackIssueModelOverrides, dropForeignAccountResumeSession, MODEL_FALLBACK_CONNECTION_REMOVED_MESSAGE } from "./model-fallback/dispatch-wiring.js";
 
 import {
   settleInterruptedNativeBootstrap,
@@ -2271,6 +2271,7 @@ export function heartbeatService(
               issueContext.assigneeAdapterOverrides,
             )
           : null;
+      issueAssigneeOverrides = dropFallbackIssueModelOverrides(issueAssigneeOverrides, run, loadedAgent.adapterType, agent.adapterType);
       const experimentalInstanceSettings =
         await instanceSettings.getExperimental();
       const isolatedWorkspacesEnabled =
@@ -2581,7 +2582,7 @@ export function heartbeatService(
         delete context.executionContinuation;
         delete context.paperclipContinuationSummary;
       }
-      dropCrossAdapterResumeSession(context, loadedAgent.adapterType, agent.adapterType);
+      dropForeignAccountResumeSession(context, run, loadedAgent.adapterType, agent.adapterType);
       const taskSessionDecodedParams = normalizeSessionParams(
         sessionCodec.deserialize(context.workspaceSelectionChanged ? null : taskSession?.sessionParamsJson ?? null),
       );
