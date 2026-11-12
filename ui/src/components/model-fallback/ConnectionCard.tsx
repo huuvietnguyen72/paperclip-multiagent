@@ -15,8 +15,6 @@ export function isExhausted(connection: FallbackConnection, now: Date): boolean 
 
 export interface ConnectionCardProps {
   connection: FallbackConnection;
-  /** 1-based number among the fallback connections; null for the default connection. */
-  fallbackNumber?: number | null;
   now: Date;
   /** Extension point: when set, the card shows the edit (pencil) button. */
   onEdit?: (connection: FallbackConnection) => void;
@@ -30,8 +28,8 @@ export function ConnectionCard({ connection, now, onEdit, onSetDefault, classNam
   const exhausted = isExhausted(connection, now);
   const badge = modelBadgeFor(connection.adapterType, connection.model);
   const position = connection.isDefault
-    ? strings.hub.positionMainDefault(connection.position + 1)
-    : strings.hub.positionFallbackN(connection.position + 1);
+    ? strings.hub.positionMainDefault(connection.position)
+    : strings.hub.positionFallbackN(connection.position);
 
   return (
     <div
@@ -76,7 +74,7 @@ export function ConnectionCard({ connection, now, onEdit, onSetDefault, classNam
               type="button"
               variant="ghost"
               size="icon-xs"
-              aria-label={strings.editDialog.title(connection.position + 1)}
+              aria-label={strings.editDialog.title(connection.position)}
               onClick={() => onEdit(connection)}
             >
               <Pencil aria-hidden />

@@ -81,7 +81,7 @@ function Body({ agent, view, now, props }: { agent: Agent; view: AgentModelFallb
             ) : null}
             {live && !live.isDefault ? (
               <span className="rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">
-                {strings.header.fallbackTag(fallbackNumber ?? live.position)}
+                {strings.header.fallbackTag(fallbackNumber ?? live.position - 1)}
               </span>
             ) : null}
           </div>

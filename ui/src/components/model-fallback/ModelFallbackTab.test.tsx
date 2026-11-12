@@ -45,12 +45,12 @@ function baseView(overrides: Partial<AgentModelFallbackView> = {}): AgentModelFa
     pinnedIssues: [{ id: "i1", identifier: "PAP-7", title: "Fix login", status: "in_progress", finished: false }],
     connections: [
       {
-        id: "default", position: 0, isDefault: true, adapterType: "claude_local", model: "claude-opus-4-8",
+        id: "default", position: 1, isDefault: true, adapterType: "claude_local", model: "claude-opus-4-8",
         aiConnection: null, accountKey: null, accountLabel: "Claude chính", exhaustedUntil: inFiveHours,
         inUse: false, lastUsedAt: "2026-11-12T07:00:00.000Z", runsToday: 3, tokensToday: 1000, quotaWindows: [],
       },
       {
-        id: "glm", position: 1, isDefault: false, adapterType: "opencode_local", model: "opencode-go/glm-5.3",
+        id: "glm", position: 2, isDefault: false, adapterType: "opencode_local", model: "opencode-go/glm-5.3",
         aiConnection: null, accountKey: null, accountLabel: "OpenCode Go", exhaustedUntil: null,
         inUse: true, lastUsedAt: "2026-11-12T08:30:00.000Z", runsToday: 2, tokensToday: 500, quotaWindows: [],
       },
