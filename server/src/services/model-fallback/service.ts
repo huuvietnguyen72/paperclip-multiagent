@@ -28,7 +28,7 @@ import {
   PROVIDER_QUOTA_RECOVERY_DEFAULT_BACKOFF_MS,
   resolveProviderQuotaRetryAt,
 } from "../recovery/provider-quota-retry-at.js";
-import { buildChain, selectConnection, type ChainEntry, type ModelFallbackSelectionKind } from "./policy.js";
+import { buildChain, readDispatchRecord, selectConnection, type ChainEntry, type ModelFallbackSelectionKind } from "./policy.js";
 import { readAgentModelFallbackView } from "./view.js";
 
 export type AgentRow = typeof agents.$inferSelect;
@@ -95,18 +95,7 @@ export function returnedComment(input: { fromLabel: string; toLabel: string }): 
   return `${input.fromLabel} → quay về ${input.toLabel} (mặc định).`;
 }
 
-/** Reads the dispatch record Task 6 stores at runnerProfileJson.adapterDispatch.modelFallback. */
-export function readDispatchRecord(run: Pick<HeartbeatRunRow, "runnerProfileJson">): ModelFallbackDispatchRecord | null {
-  const raw = parseObject(parseObject(parseObject(run.runnerProfileJson).adapterDispatch).modelFallback);
-  if (typeof raw.connectionId !== "string" || typeof raw.adapterType !== "string") return null;
-  return {
-    connectionId: raw.connectionId,
-    accountKey: typeof raw.accountKey === "string" ? raw.accountKey : null,
-    adapterType: raw.adapterType,
-    model: typeof raw.model === "string" ? raw.model : null,
-    isFallback: raw.isFallback === true,
-  };
-}
+export { readDispatchRecord };
 
 function toRecord(chain: ChainEntry[], accountKeys: (string | null)[], index: number): ModelFallbackDispatchRecord {
   const entry = chain[index]!;

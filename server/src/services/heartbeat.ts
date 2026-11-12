@@ -295,6 +295,9 @@ import {
 import {
   claimedAdapterType,
 } from "./conversation-continuation.js";
+import { createModelFallbackService } from "./model-fallback/service.js";
+import { applyModelFallbackDispatch } from "./model-fallback/policy.js";
+import { claimedAdapterForStart, MODEL_FALLBACK_CONNECTION_REMOVED_MESSAGE } from "./model-fallback/dispatch-wiring.js";
 
 import {
   settleInterruptedNativeBootstrap,
@@ -977,6 +980,7 @@ export function heartbeatService(
     if (failed?.status === "rejected") throw failed.reason;
   });
   const budgets = budgetService(db, budgetHooks);
+  const modelFallback = createModelFallbackService(db);
   const recovery = recoveryService(db, {
     enqueueWakeup,
     liveRunExecutions,
@@ -1319,6 +1323,7 @@ export function heartbeatService(
     isSameTaskScope,
     runTaskKey,
     filterZombieCoalesceTarget,
+    modelFallback,
   });
 
   const {
@@ -1819,6 +1824,7 @@ export function heartbeatService(
     traceStore,
     processRunCancellationSettlements,
     failedProcessRunCancellations,
+    modelFallback,
   });
 
   async function executeRun(
@@ -2042,10 +2048,16 @@ export function heartbeatService(
         return;
       }
       let agent = loadedAgent;
+      // A model fallback claim runs the agent on its chain entry before anything reads the adapter.
+      const modelFallbackDispatch = applyModelFallbackDispatch(agent, run);
+      agent = modelFallbackDispatch.agent;
+      if (modelFallbackDispatch.missing) {
+        await appendRunEvent(run, { eventType: "lifecycle", stream: "system", level: "warn", message: MODEL_FALLBACK_CONNECTION_REMOVED_MESSAGE });
+      }
 
       // The claimed adapter identity is immutable recovery evidence. Do not
       // execute a newly selected adapter under a previous adapter's claim.
-      const selectedAdapter = claimedAdapterType(run);
+      const selectedAdapter = claimedAdapterForStart(claimedAdapterType(run), modelFallbackDispatch);
       if (selectedAdapter && selectedAdapter !== agent.adapterType) {
         throw new Error("Agent adapter changed during startup; start a new turn with the updated agent.");
       }

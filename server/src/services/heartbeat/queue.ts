@@ -170,6 +170,7 @@ import {
 import { supportsUnscopedTimerHeartbeat } from "../heartbeat-policy.js";
 import { isUuidLike } from "@paperclipai/shared";
 import { retryChatControlAdmission } from "../chat-control-admission-retry.js";
+import { adapterDispatchForClaim, type ModelFallbackDispatcher } from "../model-fallback/dispatch-wiring.js";
 
 import type { HeartbeatServiceOptions } from "../heartbeat.js";
 import type { createHeartbeatRunState } from "./run-state.js";
@@ -225,6 +226,7 @@ export interface HeartbeatQueueDependencies extends Pick<HeartbeatRetryDependenc
   resumeQueuedCommentInterrupt: (companyId: string, queueId: string) => Promise<unknown>;
   resumeSavedLegacyComments: (companyId: string, queueId: string) => Promise<unknown>;
   formatIssueIdentifierLink: (identifier: string | null, fallback: string) => string;
+  modelFallback?: ModelFallbackDispatcher;
 }
 
 
@@ -420,6 +422,7 @@ export function createHeartbeatQueue(db: Db, dependencies: HeartbeatQueueDepende
     isSameTaskScope,
     runTaskKey,
     filterZombieCoalesceTarget,
+    modelFallback,
   } = dependencies;
 
   const { parseHeartbeatPolicy, getHeartbeatDailyCapBlock, hasActionableTimerWork, nextTimerHeartbeatAt } = createHeartbeatTimerPolicy(db);
@@ -1039,6 +1042,9 @@ export function createHeartbeatQueue(db: Db, dependencies: HeartbeatQueueDepende
         responsibleUserId: null,
       },
     });
+    // One model fallback decision per claim; every claim write below records it.
+    const adapterDispatch = await adapterDispatchForClaim(modelFallback, { agent, run, responsibleUserId }, (message) =>
+      appendRunEvent(run, { eventType: "lifecycle", stream: "system", level: "warn", message }));
     // All ordinary and comment claims use the same company-scoped issue
     // lock. A batch may claim several runs before executeRun tracks any owner.
     async function lockIssueExecutionClaim(tx: Db) {
@@ -1284,7 +1290,7 @@ export function createHeartbeatQueue(db: Db, dependencies: HeartbeatQueueDepende
                   .update(heartbeatRuns)
                   .set({
                     status: "running",
-                    runnerProfileJson: sql`(case when jsonb_typeof(${heartbeatRuns.runnerProfileJson}) = 'object' then ${heartbeatRuns.runnerProfileJson} else '{}'::jsonb end) || ${JSON.stringify({ adapterDispatch: { adapterType: agent.adapterType } })}::jsonb`,
+                    runnerProfileJson: sql`(case when jsonb_typeof(${heartbeatRuns.runnerProfileJson}) = 'object' then ${heartbeatRuns.runnerProfileJson} else '{}'::jsonb end) || ${JSON.stringify({ adapterDispatch })}::jsonb`,
                     ...legacyControllerClaim(run.runtimeMode),
                     responsibleUserId,
                     startedAt: lockedRun.startedAt ?? claimedAt,
@@ -1391,7 +1397,7 @@ export function createHeartbeatQueue(db: Db, dependencies: HeartbeatQueueDepende
                 .update(heartbeatRuns)
                 .set({
                   status: "running",
-                  runnerProfileJson: sql`(case when jsonb_typeof(${heartbeatRuns.runnerProfileJson}) = 'object' then ${heartbeatRuns.runnerProfileJson} else '{}'::jsonb end) || ${JSON.stringify({ adapterDispatch: { adapterType: agent.adapterType } })}::jsonb`,
+                  runnerProfileJson: sql`(case when jsonb_typeof(${heartbeatRuns.runnerProfileJson}) = 'object' then ${heartbeatRuns.runnerProfileJson} else '{}'::jsonb end) || ${JSON.stringify({ adapterDispatch })}::jsonb`,
                     ...legacyControllerClaim(run.runtimeMode),
                   responsibleUserId,
                   startedAt: lockedRun.startedAt ?? claimedAt,
@@ -1458,7 +1464,7 @@ export function createHeartbeatQueue(db: Db, dependencies: HeartbeatQueueDepende
       : await withChatControlRecoveryGate(run, "claim", async (tx) => {
           const claimValues = {
             status: "running",
-            runnerProfileJson: sql`(case when jsonb_typeof(${heartbeatRuns.runnerProfileJson}) = 'object' then ${heartbeatRuns.runnerProfileJson} else '{}'::jsonb end) || ${JSON.stringify({ adapterDispatch: { adapterType: agent.adapterType } })}::jsonb`,
+            runnerProfileJson: sql`(case when jsonb_typeof(${heartbeatRuns.runnerProfileJson}) = 'object' then ${heartbeatRuns.runnerProfileJson} else '{}'::jsonb end) || ${JSON.stringify({ adapterDispatch })}::jsonb`,
             ...legacyControllerClaim(run.runtimeMode),
             responsibleUserId,
             startedAt: run.startedAt ?? claimedAt,

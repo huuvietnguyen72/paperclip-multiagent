@@ -3,6 +3,7 @@ import {
   MODEL_FALLBACK_DEFAULT_CONNECTION_ID,
   modelFallbackConfigSchema,
   type AiRuntimeConnectionBinding,
+  type ModelFallbackDispatchRecord,
 } from "@paperclipai/shared";
 
 export type ChainEntry = {
@@ -61,6 +62,34 @@ export function effectiveRunAgent<A extends AgentLike>(agent: A, entry: ChainEnt
     adapterConfig: { ...carried, ...entry.adapterConfig },
     runtimeConfig,
   };
+}
+
+/** Reads the dispatch record the claim stores at runnerProfileJson.adapterDispatch.modelFallback. */
+export function readDispatchRecord(run: { runnerProfileJson: unknown }): ModelFallbackDispatchRecord | null {
+  const raw = asRecord(asRecord(asRecord(run.runnerProfileJson).adapterDispatch).modelFallback);
+  if (typeof raw.connectionId !== "string" || typeof raw.adapterType !== "string") return null;
+  return {
+    connectionId: raw.connectionId,
+    accountKey: typeof raw.accountKey === "string" ? raw.accountKey : null,
+    adapterType: raw.adapterType,
+    model: typeof raw.model === "string" ? raw.model : null,
+    isFallback: raw.isFallback === true,
+  };
+}
+
+/**
+ * The agent a claimed run executes as. A fallback record runs the agent on that chain entry; a record whose
+ * connection is no longer in the chain is reported as missing and the agent keeps its own configuration.
+ */
+export function applyModelFallbackDispatch<A extends AgentLike>(
+  agent: A,
+  run: { runnerProfileJson: unknown },
+): { agent: A; missing: boolean } {
+  const record = readDispatchRecord(run);
+  if (!record) return { agent, missing: false };
+  const entry = buildChain(agent).find((candidate) => candidate.id === record.connectionId);
+  if (!entry) return { agent, missing: true };
+  return { agent: record.isFallback ? effectiveRunAgent(agent, entry) : agent, missing: false };
 }
 
 export function selectConnection(input: {
