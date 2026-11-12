@@ -3792,6 +3792,23 @@ registry.registerPath({
 });
 
 registry.registerPath({
+  method: "get",
+  path: "/api/agents/{id}/model-fallback",
+  tags: ["agents"],
+  summary: "Read an agent's model fallback chain, the active connection, and per-connection availability",
+  request: { params: z.object({ id: z.string() }) },
+  responses: { 200: r.ok(), 401: r.unauthorized, 403: r.forbidden, 404: r.notFound },
+});
+registry.registerPath({
+  method: "get",
+  path: "/api/companies/{companyId}/model-fallback/active",
+  tags: ["agents"],
+  summary: "List the agents in a company currently running on a model fallback connection",
+  request: { params: z.object({ companyId: z.string() }) },
+  responses: { 200: r.ok(), 401: r.unauthorized, 403: r.forbidden },
+});
+
+registry.registerPath({
   method: "patch",
   path: "/api/agents/{id}/instructions-path",
   tags: ["agents"],

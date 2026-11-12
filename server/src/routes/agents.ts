@@ -137,6 +137,8 @@ import {
 import { badRequest, conflict, forbidden, HttpError, notFound, unprocessable } from "../errors.js";
 import { ONBOARDING_FIRST_TASK_SKILL_KEY, PAPERCLIP_CORE_SKILL_KEYS } from "../services/company-skills.js";
 import { createRunSecretRedactionRegistry } from "../services/run-secret-redaction.js";
+import { modelFallbackConfigSchema } from "@paperclipai/shared";
+import { validateModelFallbackPatch } from "../services/model-fallback/validate.js";
 import { assertAuthenticated, assertBoard, assertCompanyAccess, assertInstanceAdmin, buildActorSecretContext, getAccessibleResource, getActorInfo, hasCompanyAccess } from "./authz.js";
 import { runAdapterLoginStartSpine } from "./adapter-login-route-spine.js";
 import { isLoginCommandSupportedAdapterType } from "../services/login-command.js";
@@ -5553,6 +5555,17 @@ export function agentRoutes(
         existing.runtimeConfig,
       );
       requestedRuntimeConfig = req.actor.source === "mcp_oauth" ? { ...existing.runtimeConfig, ...runtimeConfig } : runtimeConfig;
+    }
+    const resultingModelFallback = (requestedRuntimeConfig ?? existing.runtimeConfig).modelFallback;
+    if (resultingModelFallback !== undefined && (requestedRuntimeConfig || requestedAdapterType !== existing.adapterType)) {
+      const parsedFallback = modelFallbackConfigSchema.safeParse(resultingModelFallback);
+      const fallbackError = parsedFallback.success
+        ? validateModelFallbackPatch({ modelFallback: parsedFallback.data, adapterType: requestedAdapterType })
+        : `Invalid model fallback configuration: ${parsedFallback.error.issues[0]?.message ?? "invalid"}`;
+      if (fallbackError) {
+        res.status(422).json({ error: fallbackError });
+        return;
+      }
     }
     const touchesAdapterConfiguration =
       hasOwn(patchData, "adapterType") ||
