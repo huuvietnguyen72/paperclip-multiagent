@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { Pencil, Star } from "lucide-react";
 import type { AgentModelFallbackView } from "@paperclipai/shared";
 import { Button } from "@/components/ui/button";
@@ -20,11 +21,13 @@ export interface ConnectionCardProps {
   onEdit?: (connection: FallbackConnection) => void;
   /** Extension point: when set, non-default cards show "Đặt mặc định". */
   onSetDefault?: (connection: FallbackConnection) => void;
+  /** Extension point: drag handle rendered before the position label (reorder). */
+  dragHandle?: ReactNode;
   className?: string;
 }
 
 /** One connection of the agent's chain: position, model, state, usage and (when exhausted) quota. */
-export function ConnectionCard({ connection, now, onEdit, onSetDefault, className }: ConnectionCardProps) {
+export function ConnectionCard({ connection, now, onEdit, onSetDefault, dragHandle, className }: ConnectionCardProps) {
   const exhausted = isExhausted(connection, now);
   const badge = modelBadgeFor(connection.adapterType, connection.model);
   const position = connection.isDefault
@@ -43,7 +46,10 @@ export function ConnectionCard({ connection, now, onEdit, onSetDefault, classNam
       )}
     >
       <div className="flex items-center justify-between gap-2 text-xs">
-        <span className="font-medium text-muted-foreground">{position}</span>
+        <span className="flex items-center gap-1 font-medium text-muted-foreground">
+          {dragHandle}
+          {position}
+        </span>
         <span
           className={cn(
             "font-medium",

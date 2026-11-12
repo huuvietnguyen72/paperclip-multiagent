@@ -1,4 +1,8 @@
 import { useEffect, useRef, useState } from "react";
+import { DndContext, KeyboardSensor, PointerSensor, closestCenter, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core";
+import { SortableContext, arrayMove, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
+import { GripVertical } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { AdapterMark } from "@/components/AdapterMark";
 import { strings } from "@/lib/model-fallback/strings";
@@ -21,10 +25,55 @@ export interface ConnectionHubProps {
   onEdit?: (connection: FallbackConnection) => void;
   onSetDefault?: (connection: FallbackConnection) => void;
   onAdd?: () => void;
+  /** Called with the whole chain's ids in the new order (drag and drop). Dropping on slot 1 sets the default. */
+  onReorder?: (orderedIds: string[]) => void;
+}
+
+function SortableConnection({ connection, now, onEdit, onSetDefault }: Pick<ConnectionHubProps, "onEdit" | "onSetDefault"> & { connection: FallbackConnection; now: Date }) {
+  const { attributes, listeners, setNodeRef, setActivatorNodeRef, transform, transition, isDragging } = useSortable({ id: connection.id });
+  return (
+    <div
+      ref={setNodeRef}
+      style={{ transform: CSS.Transform.toString(transform), transition, zIndex: isDragging ? 10 : undefined }}
+      className={cn(isDragging && "opacity-80")}
+    >
+      <ConnectionCard
+        connection={connection}
+        now={now}
+        onEdit={onEdit}
+        onSetDefault={onSetDefault}
+        dragHandle={
+          <button
+            type="button"
+            ref={setActivatorNodeRef}
+            aria-label={strings.hub.dragHandle(connection.position)}
+            className="cursor-grab touch-none rounded-sm text-muted-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            {...attributes}
+            {...listeners}
+          >
+            <GripVertical className="size-4" aria-hidden />
+          </button>
+        }
+      />
+    </div>
+  );
 }
 
 /** Agent card on the left, one card per connection on the right, SVG curves between them (md and up). */
-export function ConnectionHub({ agentName, agentAdapterType, agentRole, currentIssue, tokensToday, connections, now, onEdit, onSetDefault, onAdd }: ConnectionHubProps) {
+export function ConnectionHub({ agentName, agentAdapterType, agentRole, currentIssue, tokensToday, connections, now, onEdit, onSetDefault, onAdd, onReorder }: ConnectionHubProps) {
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+  );
+  const handleDragEnd = (event: DragEndEvent) => {
+    const { active, over } = event;
+    if (!onReorder || !over || active.id === over.id) return;
+    const ids = connections.map((connection) => connection.id);
+    const from = ids.indexOf(String(active.id));
+    const to = ids.indexOf(String(over.id));
+    if (from < 0 || to < 0) return;
+    onReorder(arrayMove(ids, from, to));
+  };
   const spacerRef = useRef<HTMLDivElement>(null);
   const cardsRef = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState(FALLBACK_SIZE);
@@ -101,15 +150,19 @@ export function ConnectionHub({ agentName, agentAdapterType, agentRole, currentI
         </div>
 
         <div ref={cardsRef} className="flex min-w-0 flex-1 flex-col gap-3">
-          {connections.map((connection) => (
-            <ConnectionCard
-              key={connection.id}
-              connection={connection}
-              now={now}
-              onEdit={onEdit}
-              onSetDefault={onSetDefault}
-            />
-          ))}
+          {onReorder ? (
+            <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+              <SortableContext items={connections.map((connection) => connection.id)} strategy={verticalListSortingStrategy}>
+                {connections.map((connection) => (
+                  <SortableConnection key={connection.id} connection={connection} now={now} onEdit={onEdit} onSetDefault={onSetDefault} />
+                ))}
+              </SortableContext>
+            </DndContext>
+          ) : (
+            connections.map((connection) => (
+              <ConnectionCard key={connection.id} connection={connection} now={now} onEdit={onEdit} onSetDefault={onSetDefault} />
+            ))
+          )}
         </div>
       </div>
       {onAdd ? (

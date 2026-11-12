@@ -5,7 +5,7 @@ import { PrimaryAgentCrownButton } from "@/components/primary-agent/PrimaryAgent
 import { AiConnectionPoolRunDetails } from "@/components/ai-connections/AiConnectionPoolRunDetails";
 import { ProviderFailureNotice } from "@/components/ProviderFailureNotice";
 import { readProviderFailure } from "@paperclipai/shared";
-import { ModelFallbackTab } from "@/components/model-fallback/ModelFallbackTab";
+import { ModelFallbackEditor } from "@/components/model-fallback/ModelFallbackEditor";
 import { AgentConnectionInstructions } from "@/features/connections/ConnectionInstructions";
 import type { AgentInstructionCandidate, AgentInstructionsBundle } from "@paperclipai/shared";
 import { InstructionHistory } from "../components/InstructionHistory";
@@ -1122,7 +1122,7 @@ export function AgentDetail() {
       )}
 
       {activeView === "connections" && resolvedCompanyId && (
-        <ModelFallbackTab agent={agent} companyId={resolvedCompanyId} />
+        <ModelFallbackEditor agent={agent} companyId={resolvedCompanyId} />
       )}
 
       {activeView === "secrets" && (
