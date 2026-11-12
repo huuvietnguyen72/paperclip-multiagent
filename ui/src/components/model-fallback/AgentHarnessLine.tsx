@@ -7,6 +7,7 @@ export function AgentHarnessLine({
   displayAdapterType,
   model,
   isFallback,
+  activeUnknown = false,
 }: {
   /** Raw adapter type, picks the brand image. */
   adapterType: string;
@@ -14,6 +15,8 @@ export function AgentHarnessLine({
   displayAdapterType: string;
   model?: string | null;
   isFallback: boolean;
+  /** The in-use connection could not be loaded; the configured harness may not be the one running. */
+  activeUnknown?: boolean;
 }) {
   return (
     <div className="mt-1 flex items-center gap-1.5 text-xs leading-4 text-muted-foreground">
@@ -25,6 +28,16 @@ export function AgentHarnessLine({
       {isFallback ? (
         <span data-testid="agent-harness-fallback-tag" className="rounded-full bg-muted px-1.5 text-foreground">
           {strings.activeFallbackTag}
+        </span>
+      ) : null}
+      {!isFallback && activeUnknown ? (
+        <span
+          data-testid="agent-harness-unknown"
+          className="rounded-full bg-muted px-1.5 text-muted-foreground"
+          title={strings.activeUnknown}
+          aria-label={strings.activeUnknown}
+        >
+          {strings.activeUnknownMark}
         </span>
       ) : null}
     </div>

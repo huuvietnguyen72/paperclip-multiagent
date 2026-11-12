@@ -4,6 +4,9 @@ export const strings = Object.freeze({
   tab: "Kết nối model",
   /** Tag shown next to the model of an agent that currently runs on a fallback connection. */
   activeFallbackTag: "Dự phòng",
+  /** Muted mark shown where the model tag goes when the in-use connection could not be loaded. */
+  activeUnknownMark: "?",
+  activeUnknown: "Không rõ kết nối đang dùng",
   header: Object.freeze({
     running: "Đang chạy",
     inUse: "Đang dùng",
@@ -21,6 +24,7 @@ export const strings = Object.freeze({
     tokens: (n: string) => `${n} token`,
     none: "—",
     returnWhen: (issues: string, time: string) => `quay về khi ${issues} xong & sau ${time}`,
+    returnWhenFinished: (issues: string) => `quay về khi ${issues} xong`,
   }),
   hub: Object.freeze({
     title: "Live · sơ đồ kết nối",

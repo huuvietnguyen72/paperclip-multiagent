@@ -7,7 +7,7 @@ import { ProviderFailureNotice } from "@/components/ProviderFailureNotice";
 import { readProviderFailure } from "@paperclipai/shared";
 import { AgentHarnessLine } from "@/components/model-fallback/AgentHarnessLine";
 import { useCompanyModelFallbackActive } from "@/hooks/useCompanyModelFallbackActive";
-import { effectiveModelFor } from "@/lib/model-fallback/effective";
+import { effectiveModelFor, fallbackActiveUnknown } from "@/lib/model-fallback/effective";
 import { ModelFallbackEditor } from "@/components/model-fallback/ModelFallbackEditor";
 import { AgentConnectionInstructions } from "@/features/connections/ConnectionInstructions";
 import type { AgentInstructionCandidate, AgentInstructionsBundle } from "@paperclipai/shared";
@@ -426,8 +426,8 @@ export function AgentDetail() {
   const agentView = useQueryView(agentQuery);
   const lifecycle = useAgentLifecycleStatus(agent);
   const resolvedCompanyId = agent?.companyId ?? selectedCompanyId;
-  // Shared with Office; an error leaves the map empty so the header shows the configured harness.
-  const { activeByAgent: fallbackActive } = useCompanyModelFallbackActive(resolvedCompanyId);
+  // Shared with Office; an error leaves the map empty, so the header shows the configured harness with an "unknown" hint.
+  const { activeByAgent: fallbackActive, isError: fallbackActiveError } = useCompanyModelFallbackActive(resolvedCompanyId);
   const canonicalAgentRef = agent ? agentRouteRef(agent) : routeAgentRef;
   const handleLegacyTabChange = useCallback((next: string) => {
     if (!prepareAgentNavigation()) return;
@@ -904,6 +904,7 @@ export function AgentDetail() {
             displayAdapterType={headerEffective.isFallback ? headerEffective.adapterType : agentDisplayAdapterType(agent)}
             model={headerEffective.model}
             isFallback={headerEffective.isFallback}
+            activeUnknown={fallbackActiveUnknown(agent, fallbackActiveError)}
           />
           <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs leading-4 text-muted-foreground">
             <InlineEditor

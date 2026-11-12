@@ -132,6 +132,16 @@ describe("ModelFallbackTab", () => {
     await act(async () => root.unmount());
   });
 
+  it("default tile says when the agent returns while unfinished tasks hold it on a fallback after the reset", async () => {
+    const view = baseView();
+    view.connections[0] = { ...view.connections[0], exhaustedUntil: null };
+    mockApi.agentView.mockResolvedValue(view);
+    const root = await render();
+    await waitFor(() => expect(container.querySelector("[data-testid=connection-default]")).not.toBeNull());
+    expect(container.textContent).toContain("quay về khi PAP-7 xong");
+    await act(async () => root.unmount());
+  });
+
   it("lists timeline events newest first", async () => {
     mockApi.agentView.mockResolvedValue(baseView());
     const root = await render();

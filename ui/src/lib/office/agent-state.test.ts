@@ -244,5 +244,17 @@ describe("deriveOfficeAgents", () => {
     const view = only({ agents: [agent({ id: "a", role: "qa" })] });
     expect(view.badge.label).toBe("Sonnet 5.5");
     expect(view.isFallback).toBe(false);
+    expect(view.fallbackUnknown).toBe(false);
+  });
+
+  it("office badge marks the in-use connection unknown when the active query failed and the agent has a chain", () => {
+    const chained = agent({ id: "a", role: "qa", runtimeConfig: { modelFallback: {
+      enabled: true, connections: [{ id: "c2", adapterType: "codex_local", adapterConfig: { model: "gpt-5.5" } }] } } } as never);
+    const view = only({ agents: [chained], fallbackActiveUnknown: true });
+    expect(view.badge.label).toBe("Sonnet 5.5");
+    expect(view.isFallback).toBe(false);
+    expect(view.fallbackUnknown).toBe(true);
+    // Without a chain the configured model is certain.
+    expect(only({ agents: [agent({ id: "a", role: "qa" })], fallbackActiveUnknown: true }).fallbackUnknown).toBe(false);
   });
 });

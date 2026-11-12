@@ -6,7 +6,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Agent, AgentModelFallbackView } from "@paperclipai/shared";
 import { swapDefault } from "@/lib/model-fallback/format";
-import { reorderBody } from "@/lib/model-fallback/edit";
+import { effortLevelsFor, reorderBody } from "@/lib/model-fallback/edit";
 import { ModelFallbackEditor } from "./ModelFallbackEditor";
 
 const FALLBACK_ID = "11111111-1111-4111-8111-111111111111";
@@ -255,6 +255,15 @@ describe("model fallback editing", () => {
     expect(body.adapterConfig).toBeUndefined();
     expect(body.replaceAdapterConfig).toBeUndefined();
     await act(async () => root.unmount());
+  });
+
+  it("codex effort levels follow the adapter's per-model list (ultra only where the model supports it)", () => {
+    expect(effortLevelsFor("codex_local", "gpt-5.5")).toEqual(["minimal", "low", "medium", "high", "xhigh"]);
+    expect(effortLevelsFor("codex_local", "gpt-6-luna")).toEqual(["low", "medium", "high", "xhigh", "max"]);
+    expect(effortLevelsFor("codex_local", "gpt-6.1-sol")).toEqual(["low", "medium", "high", "xhigh", "max", "ultra"]);
+    expect(effortLevelsFor("codex_local", "")).not.toContain("ultra");
+    expect(effortLevelsFor("claude_local", "claude-sonnet-5-5")).toEqual(["low", "medium", "high", "xhigh", "max"]);
+    expect(effortLevelsFor("opencode_local", "opencode-go/glm-5.3")).not.toContain("ultra");
   });
 
   it("reorder keeps the order after slot 1 and never drops connections", () => {

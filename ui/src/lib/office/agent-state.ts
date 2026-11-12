@@ -1,7 +1,7 @@
 import { resolveAgentAppearance, type Agent, type Approval, type Issue } from "@paperclipai/shared";
 import type { LiveRunForIssue } from "@/api/heartbeats";
 import { DEPARTMENTS, departmentForRole, type DepartmentId, type SharedAreaId } from "./departments";
-import { effectiveModelFor, type ActiveFallbackEntry } from "@/lib/model-fallback/effective";
+import { effectiveModelFor, fallbackActiveUnknown, type ActiveFallbackEntry } from "@/lib/model-fallback/effective";
 import { modelBadgeFor, type ModelBadge } from "./model-badge";
 
 export type OfficeGroup = "attention" | "working" | "idle";
@@ -33,6 +33,8 @@ export interface OfficeAgentView {
   badge: ModelBadge;
   /** True when the badge shows a fallback connection instead of the configured model. */
   isFallback: boolean;
+  /** True when the in-use connection could not be loaded and the agent may be on a fallback. */
+  fallbackUnknown?: boolean;
   assignedFlashUntil: number | null;
 }
 
@@ -49,6 +51,8 @@ export interface OfficeInputs {
   adapterLabels: ReadonlyMap<string, ReadonlyMap<string, string>>;
   /** agentId -> connection the agent is actually running on, for agents on a fallback. */
   fallbackActive?: ReadonlyMap<string, ActiveFallbackEntry>;
+  /** The company-active query failed: agents with a fallback chain show an "unknown" hint on the badge. */
+  fallbackActiveUnknown?: boolean;
   now: number;
 }
 
@@ -162,6 +166,7 @@ export function deriveOfficeAgents(input: OfficeInputs): OfficeAgentView[] {
         lastHeartbeatAt: toIso(agent.lastHeartbeatAt),
         badge: modelBadgeFor(effective.adapterType, effective.model, input.adapterLabels.get(effective.adapterType)),
         isFallback: effective.isFallback,
+        fallbackUnknown: !effective.isFallback && fallbackActiveUnknown(agent, input.fallbackActiveUnknown ?? false),
         assignedFlashUntil,
       };
     });

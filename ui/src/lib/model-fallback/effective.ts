@@ -17,6 +17,20 @@ export function fallbackActiveMap(active: CompanyModelFallbackActive | null | un
 }
 
 /**
+ * True when the company-active query failed and the agent has an enabled fallback chain, so it may be running on a
+ * fallback: the header and Office then show a neutral hint instead of claiming the configured model.
+ */
+export function fallbackActiveUnknown(
+  agent: { adapterType: string; runtimeConfig?: Record<string, unknown> | null },
+  isError: boolean,
+): boolean {
+  if (!isError || agent.adapterType === "paperclip_runner") return false;
+  const modelFallback = (agent.runtimeConfig?.modelFallback ?? {}) as { enabled?: unknown; connections?: unknown };
+  const connections = Array.isArray(modelFallback.connections) ? modelFallback.connections : [];
+  return modelFallback.enabled !== false && connections.length > 0;
+}
+
+/**
  * The adapter type and model an agent is really using. Single source for the agent header and Office, so
  * both agree: the active fallback connection when there is one, otherwise the agent's configured values.
  */

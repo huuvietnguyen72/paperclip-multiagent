@@ -100,7 +100,7 @@ export function EditConnectionDialog({ agent, companyId, connection, onClose, sa
             )}
           </FieldRow>
           <ModelSelect options={options} value={model} onChange={setModel} currentModel={currentModel} />
-          {effortKey ? <EffortSelect value={effort} levels={effortLevelsFor(adapterType)} onChange={setEffort} /> : null}
+          {effortKey ? <EffortSelect value={effort} levels={effortLevelsFor(adapterType, model)} onChange={setEffort} /> : null}
           <DialogError message={error} />
         </div>
         <DialogFooter className="sm:justify-between">

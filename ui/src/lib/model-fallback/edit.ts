@@ -6,6 +6,7 @@ import {
   type ModelFallbackConfig,
   type ModelFallbackConnection,
 } from "@paperclipai/shared";
+import { codexLocalReasoningEffortsForModel } from "@paperclipai/adapter-codex-local";
 import { createUuid } from "@/lib/uuid";
 import { swapDefault } from "./format";
 
@@ -37,10 +38,13 @@ export function effortKeyFor(adapterType: string): string | null {
   return null;
 }
 
-/** Levels each harness accepts (claude --effort, codex model_reasoning_effort, opencode --variant). */
-export function effortLevelsFor(adapterType: string): string[] {
+/**
+ * Levels each harness accepts (claude --effort, codex model_reasoning_effort, opencode --variant). Codex levels come
+ * from the adapter's per-model list, so "max"/"ultra" appear only for models that support them.
+ */
+export function effortLevelsFor(adapterType: string, model?: string | null): string[] {
   if (adapterType === "claude_local") return ["low", "medium", "high", "xhigh", "max"];
-  if (adapterType === "codex_local") return ["minimal", "low", "medium", "high", "xhigh", "max", "ultra"];
+  if (adapterType === "codex_local") return [...codexLocalReasoningEffortsForModel(model)];
   if (adapterType === "opencode_local") return ["minimal", "low", "medium", "high", "xhigh", "max"];
   return [];
 }

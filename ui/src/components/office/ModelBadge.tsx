@@ -4,7 +4,7 @@ import { strings as fallbackStrings } from "@/lib/model-fallback/strings";
 import { cn } from "@/lib/utils";
 
 /** Logo + name of the model an agent currently uses. */
-export function ModelBadge({ badge, size = "sm", className, isFallback = false }: { badge: ModelBadgeData; size?: "sm" | "xs"; className?: string; isFallback?: boolean }) {
+export function ModelBadge({ badge, size = "sm", className, isFallback = false, unknown = false }: { badge: ModelBadgeData; size?: "sm" | "xs"; className?: string; isFallback?: boolean; /** The in-use connection could not be loaded. */ unknown?: boolean }) {
   return (
     <span
       className={cn(
@@ -19,6 +19,16 @@ export function ModelBadge({ badge, size = "sm", className, isFallback = false }
       {isFallback ? (
         <span data-testid="model-badge-fallback-tag" className="shrink-0 rounded-full bg-muted px-1 text-foreground">
           {fallbackStrings.activeFallbackTag}
+        </span>
+      ) : null}
+      {!isFallback && unknown ? (
+        <span
+          data-testid="model-badge-unknown"
+          className="shrink-0 rounded-full bg-muted px-1 text-muted-foreground"
+          title={fallbackStrings.activeUnknown}
+          aria-label={fallbackStrings.activeUnknown}
+        >
+          {fallbackStrings.activeUnknownMark}
         </span>
       ) : null}
     </span>

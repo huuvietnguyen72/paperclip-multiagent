@@ -124,7 +124,10 @@ function Body({ agent, view, now, props }: { agent: Agent; view: AgentModelFallb
           hint={
             defaultExhausted
               ? strings.stats.returnWhen(unfinished.map((issue) => issue.identifier).join(", ") || strings.stats.none, resetClock)
-              : strings.hub.stateReady
+              : live && !live.isDefault && unfinished.length
+                // The default has reset but unfinished tasks still hold the agent on the fallback.
+                ? strings.stats.returnWhenFinished(unfinished.map((issue) => issue.identifier).join(", "))
+                : strings.hub.stateReady
           }
         />
       </div>

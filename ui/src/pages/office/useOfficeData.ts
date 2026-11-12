@@ -82,7 +82,7 @@ export function useOfficeData(companyId: string): OfficeData {
   });
 
   // Shares its query key with the agent header. An error leaves the map empty: configured models show.
-  const { activeByAgent: fallbackActive } = useCompanyModelFallbackActive(companyId);
+  const { activeByAgent: fallbackActive, isError: fallbackActiveUnknown } = useCompanyModelFallbackActive(companyId);
 
   const adapterTypes = useMemo(
     () => Array.from(new Set([
@@ -165,9 +165,10 @@ export function useOfficeData(companyId: string): OfficeData {
         recentAssignedAt: recentAssignedAt.current,
         adapterLabels,
         fallbackActive,
+        fallbackActiveUnknown,
         now,
       }),
-    [agentsQuery.data, liveRunsQuery.data, issuesQuery.data, approvalsQuery.data, adapterLabels, fallbackActive, now],
+    [agentsQuery.data, liveRunsQuery.data, issuesQuery.data, approvalsQuery.data, adapterLabels, fallbackActive, fallbackActiveUnknown, now],
   );
 
   const stats = useMemo(
