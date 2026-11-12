@@ -5,6 +5,9 @@ import { PrimaryAgentCrownButton } from "@/components/primary-agent/PrimaryAgent
 import { AiConnectionPoolRunDetails } from "@/components/ai-connections/AiConnectionPoolRunDetails";
 import { ProviderFailureNotice } from "@/components/ProviderFailureNotice";
 import { readProviderFailure } from "@paperclipai/shared";
+import { AgentHarnessLine } from "@/components/model-fallback/AgentHarnessLine";
+import { useCompanyModelFallbackActive } from "@/hooks/useCompanyModelFallbackActive";
+import { effectiveModelFor } from "@/lib/model-fallback/effective";
 import { ModelFallbackEditor } from "@/components/model-fallback/ModelFallbackEditor";
 import { AgentConnectionInstructions } from "@/features/connections/ConnectionInstructions";
 import type { AgentInstructionCandidate, AgentInstructionsBundle } from "@paperclipai/shared";
@@ -423,6 +426,8 @@ export function AgentDetail() {
   const agentView = useQueryView(agentQuery);
   const lifecycle = useAgentLifecycleStatus(agent);
   const resolvedCompanyId = agent?.companyId ?? selectedCompanyId;
+  // Shared with Office; an error leaves the map empty so the header shows the configured harness.
+  const { activeByAgent: fallbackActive } = useCompanyModelFallbackActive(resolvedCompanyId);
   const canonicalAgentRef = agent ? agentRouteRef(agent) : routeAgentRef;
   const handleLegacyTabChange = useCallback((next: string) => {
     if (!prepareAgentNavigation()) return;
@@ -791,6 +796,7 @@ export function AgentDetail() {
     return <QueryErrorState size="page" error={error} action="load this agent" onRetry={agentView.retry} retrying={agentView.isFetching} />;
   }
   if (!agent) return null;
+  const headerEffective = effectiveModelFor(agent, fallbackActive);
   if (!urlRunId && !urlTab) {
     return <Navigate to={agentDetailHref(canonicalAgentRef)} replace />;
   }
@@ -893,12 +899,12 @@ export function AgentDetail() {
             />
             <PrimaryAgentCrownButton agent={agent} />
           </div>
-          <div className="mt-1 flex items-center gap-1.5 text-xs leading-4 text-muted-foreground">
-            {agent.adapterType === "claude_local" || agent.adapterType === "codex_local"
-              ? <img src={`/brands/${agent.adapterType === "claude_local" ? "claude" : "codex"}-color.svg`} className="-ml-0.5 size-3.5" alt="" />
-              : null}
-            <span>{getAdapterDisplay(agentDisplayAdapterType(agent)).label}</span>
-          </div>
+          <AgentHarnessLine
+            adapterType={headerEffective.isFallback ? headerEffective.adapterType : agent.adapterType}
+            displayAdapterType={headerEffective.isFallback ? headerEffective.adapterType : agentDisplayAdapterType(agent)}
+            model={headerEffective.model}
+            isFallback={headerEffective.isFallback}
+          />
           <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs leading-4 text-muted-foreground">
             <InlineEditor
               value={agent.title ?? ""}

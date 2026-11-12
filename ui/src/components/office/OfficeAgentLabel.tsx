@@ -74,7 +74,7 @@ export const OfficeAgentLabel = forwardRef<HTMLButtonElement, {
         <span className={cn("size-1.5 rounded-full", agentToneClass(agent))} />
         {agent.name}
       </span>
-      <ModelBadge badge={agent.badge} size="xs" />
+      <ModelBadge badge={agent.badge} size="xs" isFallback={agent.isFallback} />
       <Bubble agent={agent} now={now} />
     </button>
   );

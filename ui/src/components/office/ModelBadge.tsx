@@ -1,9 +1,10 @@
 import { AdapterMark } from "@/components/AdapterMark";
 import type { ModelBadge as ModelBadgeData } from "@/lib/office/model-badge";
+import { strings as fallbackStrings } from "@/lib/model-fallback/strings";
 import { cn } from "@/lib/utils";
 
 /** Logo + name of the model an agent currently uses. */
-export function ModelBadge({ badge, size = "sm", className }: { badge: ModelBadgeData; size?: "sm" | "xs"; className?: string }) {
+export function ModelBadge({ badge, size = "sm", className, isFallback = false }: { badge: ModelBadgeData; size?: "sm" | "xs"; className?: string; isFallback?: boolean }) {
   return (
     <span
       className={cn(
@@ -15,6 +16,11 @@ export function ModelBadge({ badge, size = "sm", className }: { badge: ModelBadg
     >
       <AdapterMark type={badge.markType} className={size === "xs" ? "size-3" : "size-3.5"} />
       <span className="truncate">{badge.label}</span>
+      {isFallback ? (
+        <span data-testid="model-badge-fallback-tag" className="shrink-0 rounded-full bg-muted px-1 text-foreground">
+          {fallbackStrings.activeFallbackTag}
+        </span>
+      ) : null}
     </span>
   );
 }

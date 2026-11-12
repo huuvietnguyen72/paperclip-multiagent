@@ -6,6 +6,7 @@ import { approvalsApi } from "@/api/approvals";
 import { costsApi } from "@/api/costs";
 import { heartbeatsApi } from "@/api/heartbeats";
 import { issuesApi } from "@/api/issues";
+import { useCompanyModelFallbackActive } from "@/hooks/useCompanyModelFallbackActive";
 import { useCompanyLiveEvent } from "@/context/LiveUpdatesProvider";
 import { deriveOfficeAgents, type OfficeAgentView } from "@/lib/office/agent-state";
 import { feedItemFromLiveEvent, pushFeedItem, type FeedItem } from "@/lib/office/activity-feed";
@@ -80,9 +81,15 @@ export function useOfficeData(companyId: string): OfficeData {
     refetchInterval: SLOW_REFRESH_MS,
   });
 
+  // Shares its query key with the agent header. An error leaves the map empty: configured models show.
+  const { activeByAgent: fallbackActive } = useCompanyModelFallbackActive(companyId);
+
   const adapterTypes = useMemo(
-    () => Array.from(new Set((agentsQuery.data ?? []).map((agent) => agent.adapterType))).sort(),
-    [agentsQuery.data],
+    () => Array.from(new Set([
+      ...(agentsQuery.data ?? []).map((agent) => agent.adapterType),
+      ...Array.from(fallbackActive.values(), (entry) => entry.adapterType),
+    ])).sort(),
+    [agentsQuery.data, fallbackActive],
   );
   const adapterModelQueries = useQueries({
     queries: adapterTypes.map((type) => ({
@@ -157,9 +164,10 @@ export function useOfficeData(companyId: string): OfficeData {
         recentCommentAt: recentCommentAt.current,
         recentAssignedAt: recentAssignedAt.current,
         adapterLabels,
+        fallbackActive,
         now,
       }),
-    [agentsQuery.data, liveRunsQuery.data, issuesQuery.data, approvalsQuery.data, adapterLabels, now],
+    [agentsQuery.data, liveRunsQuery.data, issuesQuery.data, approvalsQuery.data, adapterLabels, fallbackActive, now],
   );
 
   const stats = useMemo(

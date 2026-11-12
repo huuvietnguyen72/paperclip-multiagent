@@ -68,6 +68,7 @@ function view(overrides: Partial<OfficeAgentView> & { id: string }): OfficeAgent
     lastHeartbeatAt: null,
     badge: { label: "Sonnet 5.5", markType: "claude_local" },
     assignedFlashUntil: null,
+    isFallback: false,
     ...overrides,
   };
 }

@@ -2,6 +2,8 @@
 // without touching components.
 export const strings = Object.freeze({
   tab: "Kết nối model",
+  /** Tag shown next to the model of an agent that currently runs on a fallback connection. */
+  activeFallbackTag: "Dự phòng",
   header: Object.freeze({
     running: "Đang chạy",
     inUse: "Đang dùng",

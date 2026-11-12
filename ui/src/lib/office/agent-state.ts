@@ -1,6 +1,7 @@
 import { resolveAgentAppearance, type Agent, type Approval, type Issue } from "@paperclipai/shared";
 import type { LiveRunForIssue } from "@/api/heartbeats";
 import { DEPARTMENTS, departmentForRole, type DepartmentId, type SharedAreaId } from "./departments";
+import { effectiveModelFor, type ActiveFallbackEntry } from "@/lib/model-fallback/effective";
 import { modelBadgeFor, type ModelBadge } from "./model-badge";
 
 export type OfficeGroup = "attention" | "working" | "idle";
@@ -30,6 +31,8 @@ export interface OfficeAgentView {
   waitingOn: string | null;
   lastHeartbeatAt: string | null;
   badge: ModelBadge;
+  /** True when the badge shows a fallback connection instead of the configured model. */
+  isFallback: boolean;
   assignedFlashUntil: number | null;
 }
 
@@ -44,6 +47,8 @@ export interface OfficeInputs {
   recentAssignedAt: ReadonlyMap<string, number>;
   /** adapterType → (modelId → label) from the adapter's model list. */
   adapterLabels: ReadonlyMap<string, ReadonlyMap<string, string>>;
+  /** agentId -> connection the agent is actually running on, for agents on a fallback. */
+  fallbackActive?: ReadonlyMap<string, ActiveFallbackEntry>;
   now: number;
 }
 
@@ -135,7 +140,7 @@ export function deriveOfficeAgents(input: OfficeInputs): OfficeAgentView[] {
       }
       if (assignedFlashUntil != null) spot = "desk";
 
-      const model = typeof agent.adapterConfig?.model === "string" ? agent.adapterConfig.model : null;
+      const effective = effectiveModelFor(agent, input.fallbackActive);
       return {
         id: agent.id,
         name: agent.name,
@@ -155,7 +160,8 @@ export function deriveOfficeAgents(input: OfficeInputs): OfficeAgentView[] {
         runStartedAt: run?.startedAt ?? null,
         waitingOn: group === "idle" ? (covered?.blockerAttention?.sampleBlockerIdentifier ?? null) : null,
         lastHeartbeatAt: toIso(agent.lastHeartbeatAt),
-        badge: modelBadgeFor(agent.adapterType, model, input.adapterLabels.get(agent.adapterType)),
+        badge: modelBadgeFor(effective.adapterType, effective.model, input.adapterLabels.get(effective.adapterType)),
+        isFallback: effective.isFallback,
         assignedFlashUntil,
       };
     });

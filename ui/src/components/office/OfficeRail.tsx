@@ -65,7 +65,7 @@ function AgentCard({ agent, now, selected, onSelect, onAssign }: {
             </span>
           ) : null}
         </span>
-        <ModelBadge badge={agent.badge} size="xs" className="pl-4" />
+        <ModelBadge badge={agent.badge} size="xs" className="pl-4" isFallback={agent.isFallback} />
         <span className="truncate pl-4 text-xs text-muted-foreground">{statusText(agent, now)}</span>
       </button>
       {selected ? (

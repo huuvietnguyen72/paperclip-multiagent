@@ -48,6 +48,7 @@ function inputs(overrides: Partial<OfficeInputs>): OfficeInputs {
     recentCommentAt: new Map(),
     recentAssignedAt: new Map(),
     adapterLabels: new Map(),
+    fallbackActive: new Map(),
     now: NOW,
     ...overrides,
   };
@@ -225,5 +226,23 @@ describe("deriveOfficeAgents", () => {
       ],
     }));
     expect(views.map((v) => v.id)).toEqual(["ceo", "pm", "be", "qa"]);
+  });
+
+  it("office badge shows fallback model when active", () => {
+    const view = only({
+      agents: [agent({ id: "a", role: "qa" })],
+      fallbackActive: new Map([
+        ["a", { agentId: "a", connectionId: "c2", adapterType: "codex_local", model: "gpt-5.5", isFallback: true }],
+      ]),
+    });
+    expect(view.badge.label).toBe("GPT-5.5");
+    expect(view.badge.markType).toBe("codex_local");
+    expect(view.isFallback).toBe(true);
+  });
+
+  it("office badge is unchanged when the agent is not on a fallback", () => {
+    const view = only({ agents: [agent({ id: "a", role: "qa" })] });
+    expect(view.badge.label).toBe("Sonnet 5.5");
+    expect(view.isFallback).toBe(false);
   });
 });
