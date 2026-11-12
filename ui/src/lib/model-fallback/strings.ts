@@ -1,0 +1,75 @@
+// Every user-visible string of the agent "Kết nối model" tab. Kept in one place so wording can change
+// without touching components.
+export const strings = Object.freeze({
+  tab: "Kết nối model",
+  header: Object.freeze({
+    running: "Đang chạy",
+    fallbackTag: (n: number) => `Dự phòng ${n}`,
+    reason: (label: string, time: string) => `${label} hết token đến ${time}`,
+    more: (n: number) => `+${n} kết nối khác`,
+    settings: "⚙ Cài đặt chuyển đổi",
+  }),
+  stats: Object.freeze({
+    inUse: "Đang dùng",
+    currentTask: "Task hiện tại",
+    switchesToday: "Chuyển hôm nay",
+    default: "Mặc định",
+    returnWhen: (issues: string, time: string) => `quay về khi ${issues} xong & sau ${time}`,
+  }),
+  hub: Object.freeze({
+    title: "Live · sơ đồ kết nối",
+    positionMain: "Chính",
+    positionDefault: "★ Mặc định",
+    positionFallback: "Dự phòng",
+    stateInUse: "● Đang dùng",
+    stateExhausted: (remaining: string) => `Hết token · ${remaining}`,
+    stateReady: "Sẵn sàng",
+    setDefault: "☆ Đặt mặc định",
+    addAccount: "＋ Thêm tài khoản / provider",
+    quota5h: "5h",
+    quotaWeek: "tuần",
+  }),
+  timeline: Object.freeze({
+    title: "Dòng thời gian",
+    today: "hôm nay",
+    switched: (from: string, to: string) => `Chuyển ${from} → ${to}`,
+    returned: (to: string) => `Quay về ${to}`,
+    defaultChanged: (from: string, to: string) => `Đổi mặc định: ${from} → ${to}`,
+    quotaReason: (time: string) => `hết token, reset ${time}`,
+  }),
+  editDialog: Object.freeze({
+    title: (n: number) => `Sửa kết nối ${n}`,
+    note: "Đổi model áp dụng từ run tiếp theo; run đang chạy không bị ngắt.",
+    harness: "Harness",
+    account: "Tài khoản",
+    model: "Model",
+    thinkingEffort: "Thinking effort",
+    remove: "Xoá kết nối",
+    cancel: "Huỷ",
+    save: "Lưu",
+  }),
+  addDialog: Object.freeze({
+    title: "Thêm kết nối dự phòng",
+    note: "Thêm vào cuối chuỗi; kéo thả trên sơ đồ để đổi thứ tự.",
+    types: Object.freeze({
+      opencodeGo: Object.freeze({ label: "OpenCode Go", description: "Model OpenCode Go qua đăng nhập trên máy" }),
+      claudeAccount: Object.freeze({ label: "Tài khoản Claude khác", description: "Dùng thêm một tài khoản Claude" }),
+      codex: Object.freeze({ label: "Codex (OpenAI)", description: "Dùng Codex với tài khoản OpenAI" }),
+      anthropicCompatible: Object.freeze({
+        label: "Endpoint tương thích Anthropic",
+        description: "Endpoint riêng theo giao thức Anthropic",
+      }),
+    }),
+    testConnection: "Kiểm tra kết nối",
+    add: "Thêm",
+  }),
+  settingsDialog: Object.freeze({
+    autoSwitch: "Tự động chuyển khi hết token",
+    noResetWait: "Thời gian chờ khi không rõ giờ reset (phút)",
+    order: "Thứ tự kết nối",
+  }),
+  states: Object.freeze({
+    loading: "Đang tải…",
+    loadFailed: "Không tải được thông tin kết nối.",
+  }),
+});
