@@ -24,8 +24,10 @@ export const MODEL_FALLBACK_CARRY_KEYS: readonly string[] = [
   "instructionsFilePath",
   "instructionsRootPath",
   "instructionsEntryFile",
+  "instructionsBundleMode",
+  "paperclipSkillSync",
   "promptTemplate",
-  "bootstrapPromptTemplate",
+  "env",
   "timeoutSec",
   "graceSec",
 ];

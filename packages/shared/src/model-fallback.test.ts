@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { modelFallbackConfigSchema } from "./model-fallback.js";
+import { MODEL_FALLBACK_CARRY_KEYS, modelFallbackConfigSchema } from "./model-fallback.js";
 import { agentRuntimeConfigSchema } from "./validators/agent.js";
 
 const uuid = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, "0")}`;
@@ -27,6 +27,21 @@ describe("model fallback contracts", () => {
 
   it("rejects duplicate connection ids", () => {
     expect(modelFallbackConfigSchema.safeParse({ enabled: true, connections: [conn(1), conn(1)] }).success).toBe(false);
+  });
+
+  it("carries exactly the planned adapterConfig keys", () => {
+    expect(MODEL_FALLBACK_CARRY_KEYS).toEqual([
+      "cwd",
+      "instructionsFilePath",
+      "instructionsRootPath",
+      "instructionsEntryFile",
+      "instructionsBundleMode",
+      "paperclipSkillSync",
+      "promptTemplate",
+      "env",
+      "timeoutSec",
+      "graceSec",
+    ]);
   });
 
   it("agentRuntimeConfigSchema keeps modelFallback", () => {
