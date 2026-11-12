@@ -32,6 +32,8 @@ export function buildChain(agent: AgentLike): ChainEntry[] {
       aiConnection: (runtimeConfig.aiConnection as AiRuntimeConnectionBinding | undefined) ?? null,
     },
   ];
+  // Ruling P8: native runner claims are exact-match evidence elsewhere, so a runner agent never falls back.
+  if (agent.adapterType === "paperclip_runner") return chain;
   const parsed = modelFallbackConfigSchema.safeParse(runtimeConfig.modelFallback);
   if (!parsed.success || !parsed.data.enabled) return chain;
   for (const connection of parsed.data.connections) {

@@ -297,7 +297,7 @@ import {
 } from "./conversation-continuation.js";
 import { createModelFallbackService } from "./model-fallback/service.js";
 import { applyModelFallbackDispatch } from "./model-fallback/policy.js";
-import { claimedAdapterForStart, MODEL_FALLBACK_CONNECTION_REMOVED_MESSAGE } from "./model-fallback/dispatch-wiring.js";
+import { dropCrossAdapterResumeSession, MODEL_FALLBACK_CONNECTION_REMOVED_MESSAGE } from "./model-fallback/dispatch-wiring.js";
 
 import {
   settleInterruptedNativeBootstrap,
@@ -2057,7 +2057,7 @@ export function heartbeatService(
 
       // The claimed adapter identity is immutable recovery evidence. Do not
       // execute a newly selected adapter under a previous adapter's claim.
-      const selectedAdapter = claimedAdapterForStart(claimedAdapterType(run), modelFallbackDispatch);
+      const selectedAdapter = claimedAdapterType(run);
       if (selectedAdapter && selectedAdapter !== agent.adapterType) {
         throw new Error("Agent adapter changed during startup; start a new turn with the updated agent.");
       }
@@ -2092,6 +2092,7 @@ export function heartbeatService(
       }
       const runtime = await timePreparation("runtime_state", () => ensureRuntimeState(agent));
       const context = parseObject(run.contextSnapshot);
+      dropCrossAdapterResumeSession(context, loadedAgent.adapterType, agent.adapterType);
       const authorizeFailedChatRetryExecution = () =>
         db.transaction((tx) =>
           authorizeFailedChatRunRetryWake(db, tx as unknown as Db, {

@@ -17,10 +17,11 @@ import { createHeartbeatRunCompletion, type CompleteHeartbeatRunInput, type Hear
 import { createHeartbeatRunPreparation } from "../heartbeat/run-preparation.js";
 import { createHeartbeatRunState, getAdapterSessionCodec } from "../heartbeat/run-state.js";
 import { buildEffectiveRunSessionConfigMetadata } from "../heartbeat/workspaces.js";
+import * as dispatchWiring from "./dispatch-wiring.js";
 import {
   adapterDispatchForClaim,
   adapterDispatchJson,
-  claimedAdapterForStart,
+  dropCrossAdapterResumeSession,
   MODEL_FALLBACK_SELECTION_FAILED_MESSAGE,
   modelFallbackSwitchRetry,
 } from "./dispatch-wiring.js";
@@ -95,16 +96,34 @@ describe("applyModelFallbackDispatch", () => {
   });
 });
 
-describe("claimedAdapterForStart", () => {
-  it("keeps the claim check unless a removed fallback connection made the claim stale", () => {
-    const applied = { agent: { adapterType: "claude_local" }, missing: false };
-    expect(claimedAdapterForStart("opencode_local", applied)).toBe("opencode_local");
-    expect(claimedAdapterForStart(null, applied)).toBeNull();
-    // Removed fallback: the run continues on the agent's own adapter.
-    expect(claimedAdapterForStart("opencode_local", { ...applied, missing: true })).toBeNull();
-    // Native runner evidence must still match its claim.
-    expect(claimedAdapterForStart("paperclip_runner", { ...applied, missing: true })).toBe("paperclip_runner");
-    expect(claimedAdapterForStart("opencode_local", { agent: { adapterType: "paperclip_runner" }, missing: true })).toBe("opencode_local");
+describe("dropCrossAdapterResumeSession", () => {
+  function resumeContext() {
+    return {
+      issueId: "issue-1",
+      resumeFromRunId: "run-0",
+      resumeSessionDisplayId: "claude-session",
+      resumeSessionParams: { sessionId: "claude-session", cwd: "/work" },
+    };
+  }
+
+  it("a fallback record plus resumeSessionParams in the context must not reach the fallback adapter", () => {
+    const { agent: runAgent } = applyModelFallbackDispatch(configuredAgent, claimedRun(fallbackRecord()));
+    const context: Record<string, unknown> = resumeContext();
+    dropCrossAdapterResumeSession(context, configuredAgent.adapterType, runAgent.adapterType);
+    expect(runAgent.adapterType).toBe("opencode_local");
+    expect(context).toEqual({ issueId: "issue-1" });
+  });
+
+  it("keeps an explicit resume on the agent's own adapter", () => {
+    const context: Record<string, unknown> = resumeContext();
+    dropCrossAdapterResumeSession(context, "claude_local", "claude_local");
+    expect(context).toEqual(resumeContext());
+  });
+});
+
+describe("removed fallback connection keeps the claimed-adapter invariant", () => {
+  it("has no bypass of the claimed adapter check", () => {
+    expect("claimedAdapterForStart" in dispatchWiring).toBe(false);
   });
 });
 
@@ -178,6 +197,15 @@ describe("heartbeat start order (ruling P4)", () => {
     expect(applied).toBeLessThan(startup.indexOf("agent.adapterType"));
     expect(applied).toBeLessThan(startup.indexOf("claimedAdapterType(run)"));
     expect(applied).toBeLessThan(startup.indexOf("getTaskSession("));
+    // A removed fallback connection still fails the unchanged claimed-adapter check (new admission on next wake).
+    expect(startup).toContain("const selectedAdapter = claimedAdapterType(run);");
+    // Cross-adapter explicit resume data is dropped as soon as the run context is read, before any resume read.
+    const contextRead = startup.indexOf("const context = parseObject(run.contextSnapshot);");
+    const dropped = startup.indexOf("dropCrossAdapterResumeSession(context, loadedAgent.adapterType, agent.adapterType)");
+    expect(contextRead).toBeGreaterThan(0);
+    expect(dropped).toBeGreaterThan(contextRead);
+    expect(dropped).toBeLessThan(startup.indexOf("context.resumeSessionParams"));
+    expect(dropped).toBeLessThan(startup.indexOf("authorizeFailedChatRetryExecution"));
   });
 });
 
@@ -219,6 +247,14 @@ describe.skipIf(!support.supported)("model fallback heartbeat wiring", () => {
     const session = await createHeartbeatRunState(db).getTaskSession(runAgent.companyId, runAgent.id, runAgent.adapterType, taskKey);
     expect(runAgent.adapterType).toBe("opencode_local");
     expect(session).toMatchObject({ adapterType: "opencode_local", sessionDisplayId: "opencode-session" });
+  });
+
+  it("paperclip_runner agent with a configured chain dispatches legacy (ruling P8)", async () => {
+    const { agent } = await seedAgent(fallbackRuntimeConfig(), "paperclip_runner");
+    const run = { id: randomUUID(), companyId: agent.companyId, agentId: agent.id } as typeof heartbeatRuns.$inferSelect;
+    const result = await createModelFallbackService(db).selectForDispatch({ agent, run, responsibleUserId: null });
+    expect(result).toEqual({ adapterType: "paperclip_runner", record: null, kind: "legacy", entry: null });
+    expect(adapterDispatchJson(result)).toEqual({ adapterType: "paperclip_runner" });
   });
 
   async function queuedFixture() {

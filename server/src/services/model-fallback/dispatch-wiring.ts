@@ -18,7 +18,7 @@ export type AdapterDispatchJson = { adapterType: string; modelFallback?: ModelFa
 export const MODEL_FALLBACK_SELECTION_FAILED_MESSAGE =
   "Model fallback selection failed; this run uses the agent's own model connection.";
 export const MODEL_FALLBACK_CONNECTION_REMOVED_MESSAGE =
-  "The model fallback connection chosen for this run was removed; this run uses the agent's own model connection.";
+  "The model fallback connection chosen for this run was removed; the run cannot start under its claim. The next wake uses the current connection chain.";
 
 export type ModelFallbackSwitchRetryOptions = {
   retryReason: string;
@@ -54,16 +54,18 @@ export async function adapterDispatchForClaim(
 }
 
 /**
- * The adapter the claim binds this start to. A removed fallback connection makes the claimed fallback adapter stale,
- * and the run continues on the agent's own adapter. Native runner evidence must still match its claim.
+ * Explicit-resume session data is resolved against the agent's configured adapter (and a switch retry copies the
+ * failed run's context), so a run dispatched to a different adapter must not be handed that session.
  */
-export function claimedAdapterForStart(
-  claimedAdapterType: string | null,
-  applied: { agent: { adapterType: string }; missing: boolean },
-): string | null {
-  if (!applied.missing || claimedAdapterType === null) return claimedAdapterType;
-  if (claimedAdapterType === "paperclip_runner" || applied.agent.adapterType === "paperclip_runner") return claimedAdapterType;
-  return null;
+export function dropCrossAdapterResumeSession(
+  context: Record<string, unknown>,
+  configuredAdapterType: string,
+  dispatchedAdapterType: string,
+): void {
+  if (configuredAdapterType === dispatchedAdapterType) return;
+  delete context.resumeSessionParams;
+  delete context.resumeSessionDisplayId;
+  delete context.resumeFromRunId;
 }
 
 /**

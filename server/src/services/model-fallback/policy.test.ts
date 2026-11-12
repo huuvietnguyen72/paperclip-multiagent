@@ -43,6 +43,21 @@ describe("buildChain", () => {
     });
     expect(result.length).toBe(1);
   });
+
+  it("paperclip_runner agent gets a default-only chain even with a configured chain (ruling P8)", () => {
+    const result = buildChain({
+      adapterType: "paperclip_runner",
+      adapterConfig: {},
+      runtimeConfig: {
+        modelFallback: {
+          enabled: true,
+          connections: [{ id: CONN_B, adapterType: "opencode_local", adapterConfig: { model: "x/y" } }],
+        },
+      },
+    });
+    expect(result).toHaveLength(1);
+    expect(result[0]).toMatchObject({ id: "default", adapterType: "paperclip_runner" });
+  });
 });
 
 describe("effectiveRunAgent", () => {
