@@ -4,6 +4,7 @@ import {
   type ModelFallbackConnection,
 } from "@paperclipai/shared";
 import { getAdapterDisplay } from "@/adapters/adapter-display-registry";
+import { createUuid } from "@/lib/uuid";
 import { modelBadgeFor } from "@/lib/office/model-badge";
 
 export function formatRemaining(until: Date, now: Date): string {
@@ -63,7 +64,7 @@ export function swapDefault(agent: SwapAgent, connectionId: string): SwapDefault
 
   const oldAiConnection = runtimeConfig.aiConnection as ModelFallbackConnection["aiConnection"] | undefined;
   const demoted: ModelFallbackConnection = {
-    id: crypto.randomUUID(),
+    id: createUuid(),
     adapterType: agent.adapterType as ModelFallbackConnection["adapterType"],
     adapterConfig: oldOwn,
     ...(oldAiConnection ? { aiConnection: oldAiConnection } : {}),

@@ -52,12 +52,12 @@ export const strings = Object.freeze({
     title: "Thêm kết nối dự phòng",
     note: "Thêm vào cuối chuỗi; kéo thả trên sơ đồ để đổi thứ tự.",
     types: Object.freeze({
-      opencodeGo: Object.freeze({ label: "OpenCode Go", description: "Model OpenCode Go qua đăng nhập trên máy" }),
-      claudeAccount: Object.freeze({ label: "Tài khoản Claude khác", description: "Dùng thêm một tài khoản Claude" }),
-      codex: Object.freeze({ label: "Codex (OpenAI)", description: "Dùng Codex với tài khoản OpenAI" }),
+      opencodeGo: Object.freeze({ label: "OpenCode Go", description: "Dùng tài khoản OpenCode Go đã đăng nhập · GLM, DeepSeek, Kimi, Qwen" }),
+      claudeAccount: Object.freeze({ label: "Tài khoản Claude khác", description: "Claude Code với một kết nối AI Anthropic khác trong Paperclip" }),
+      codex: Object.freeze({ label: "Codex (OpenAI)", description: "Codex CLI đã đăng nhập" }),
       anthropicCompatible: Object.freeze({
         label: "Endpoint tương thích Anthropic",
-        description: "Endpoint riêng theo giao thức Anthropic",
+        description: "Claude Code + base URL & key lưu trong Secrets (vd. Z.ai GLM)",
       }),
     }),
     testConnection: "Kiểm tra kết nối",

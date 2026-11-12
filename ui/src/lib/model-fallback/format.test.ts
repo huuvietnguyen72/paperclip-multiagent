@@ -1,8 +1,10 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { MODEL_FALLBACK_CARRY_KEYS } from "@paperclipai/shared";
 import { connectionLabel, formatRemaining, swapDefault } from "./format";
 
 describe("model fallback format", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
   it("formatRemaining hours and minutes", () => {
     const now = new Date("2026-11-12T10:00:00Z");
     expect(formatRemaining(new Date(now.getTime() + (5 * 60 + 28) * 60_000), now)).toBe("còn 5g 28p");
@@ -54,5 +56,63 @@ describe("model fallback format", () => {
     expect(mf.connections[1].adapterConfig).toEqual({ model: "claude-sonnet-4-6" });
     for (const key of MODEL_FALLBACK_CARRY_KEYS) expect(key in mf.connections[1].adapterConfig).toBe(false);
     expect(out.runtimeConfig.enabled).toBe(true);
+  });
+  const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+  const conn = (id: string, model: string, aiConnection?: unknown) => ({
+    id,
+    adapterType: "opencode_local",
+    adapterConfig: { model },
+    ...(aiConnection ? { aiConnection } : {}),
+  });
+  const A = "11111111-1111-4111-8111-111111111111";
+
+  it("swapDefault builds a valid uuid without crypto.randomUUID", () => {
+    vi.stubGlobal("crypto", {
+      getRandomValues: (bytes: Uint8Array) => {
+        for (let i = 0; i < bytes.length; i += 1) bytes[i] = i * 7;
+        return bytes;
+      },
+    });
+    const agent = {
+      adapterType: "claude_local",
+      adapterConfig: { model: "m" },
+      runtimeConfig: { modelFallback: { enabled: true, connections: [conn(A, "opencode-go/x")] } },
+    };
+    const out = swapDefault(agent as never, A);
+    const mf = out.runtimeConfig.modelFallback as { connections: Array<{ id: string }> };
+    expect(mf.connections[0].id).toMatch(UUID_V4);
+  });
+
+  it("swapDefault moves aiConnection bindings with the swap", () => {
+    const oldBinding = { connectionId: "old" };
+    const newBinding = { connectionId: "new" };
+    const agent = {
+      adapterType: "claude_local",
+      adapterConfig: { model: "m" },
+      runtimeConfig: { aiConnection: oldBinding, modelFallback: { enabled: true, connections: [conn(A, "x", newBinding)] } },
+    };
+    const out = swapDefault(agent as never, A);
+    expect(out.runtimeConfig.aiConnection).toEqual(newBinding);
+    const mf = out.runtimeConfig.modelFallback as { connections: Array<Record<string, unknown>> };
+    expect(mf.connections[0].aiConnection).toEqual(oldBinding);
+  });
+
+  it("swapDefault removes aiConnection when the chosen entry has none", () => {
+    const agent = {
+      adapterType: "claude_local",
+      adapterConfig: { model: "m" },
+      runtimeConfig: { aiConnection: { connectionId: "old" }, modelFallback: { enabled: true, connections: [conn(A, "x")] } },
+    };
+    const out = swapDefault(agent as never, A);
+    expect("aiConnection" in out.runtimeConfig).toBe(false);
+  });
+
+  it("swapDefault throws for an unknown connection id", () => {
+    const agent = {
+      adapterType: "claude_local",
+      adapterConfig: { model: "m" },
+      runtimeConfig: { modelFallback: { enabled: true, connections: [conn(A, "x")] } },
+    };
+    expect(() => swapDefault(agent as never, "nope")).toThrow();
   });
 });
