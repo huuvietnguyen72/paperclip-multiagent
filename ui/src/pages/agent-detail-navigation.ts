@@ -1,3 +1,4 @@
+import { strings } from "@/lib/model-fallback/strings";
 import { auditSectionHref, type AuditSection } from "./audit/audit-navigation";
 
 export type AgentAuditView = Extract<AuditSection, "activity" | "runs" | "costs" | "budgets">;
@@ -7,6 +8,7 @@ export type AgentDetailView =
   | "instructions"
   | "skills"
   | "runtime"
+  | "connections"
   | "secrets"
   | "tools"
   | "channels"
@@ -29,6 +31,7 @@ export const AGENT_DETAIL_NAVIGATION: ReadonlyArray<{
       { value: "overview", label: "Overview" },
       { value: "instructions", label: "Identity" },
       { value: "runtime", label: "Harness / Runtime" },
+      { value: "connections", label: strings.tab },
       { value: "secrets", label: "Secrets & variables" },
       { value: "permissions", label: "Permissions / Trust" },
       { value: "advanced", label: "Advanced" },
@@ -68,6 +71,7 @@ export function parseAgentDetailView(value: string | null): AgentLocalDetailView
   if (value === "identity" || value === "instructions" || value === "prompts") return "instructions";
   if (value === "skills") return "skills";
   if (value === "runtime" || value === "configure" || value === "configuration") return "runtime";
+  if (value === "connections") return "connections";
   if (value === "secrets") return "secrets";
   if (value === "tools") return "tools";
   if (value === "channels") return "channels";

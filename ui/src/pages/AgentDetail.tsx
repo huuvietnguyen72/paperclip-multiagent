@@ -5,6 +5,7 @@ import { PrimaryAgentCrownButton } from "@/components/primary-agent/PrimaryAgent
 import { AiConnectionPoolRunDetails } from "@/components/ai-connections/AiConnectionPoolRunDetails";
 import { ProviderFailureNotice } from "@/components/ProviderFailureNotice";
 import { readProviderFailure } from "@paperclipai/shared";
+import { ModelFallbackTab } from "@/components/model-fallback/ModelFallbackTab";
 import { AgentConnectionInstructions } from "@/features/connections/ConnectionInstructions";
 import type { AgentInstructionCandidate, AgentInstructionsBundle } from "@paperclipai/shared";
 import { InstructionHistory } from "../components/InstructionHistory";
@@ -324,7 +325,7 @@ export function runDetailRefetchIntervalMs(status: HeartbeatRun["status"]): 5000
   return false;
 }
 
-const UNTITLED_AGENT_VIEWS: ReadonlySet<AgentDetailView> = new Set(["overview", "instructions", "budgets"]);
+const UNTITLED_AGENT_VIEWS: ReadonlySet<AgentDetailView> = new Set(["overview", "instructions", "budgets", "connections"]);
 const OVERVIEW_ACTIVITY_LIMIT = 200;
 
 function agentViewDescription(view: AgentDetailView, name: string): string | null {
@@ -1118,6 +1119,10 @@ export function AgentDetail() {
             hideInstructionsFile
           />
         </div>
+      )}
+
+      {activeView === "connections" && resolvedCompanyId && (
+        <ModelFallbackTab agent={agent} companyId={resolvedCompanyId} />
       )}
 
       {activeView === "secrets" && (

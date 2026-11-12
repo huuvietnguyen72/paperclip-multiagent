@@ -14,6 +14,8 @@ export const strings = Object.freeze({
     currentTask: "Task hiện tại",
     switchesToday: "Chuyển hôm nay",
     default: "Mặc định",
+    tokens: (n: string) => `${n} token`,
+    none: "—",
     returnWhen: (issues: string, time: string) => `quay về khi ${issues} xong & sau ${time}`,
   }),
   hub: Object.freeze({
@@ -26,6 +28,8 @@ export const strings = Object.freeze({
     stateReady: "Sẵn sàng",
     setDefault: "☆ Đặt mặc định",
     addAccount: "＋ Thêm tài khoản / provider",
+    runsToday: (n: number) => `${n} run hôm nay`,
+    agent: "Agent",
     quota5h: "5h",
     quotaWeek: "tuần",
   }),
@@ -35,6 +39,9 @@ export const strings = Object.freeze({
     switched: (from: string, to: string) => `Chuyển ${from} → ${to}`,
     returned: (to: string) => `Quay về ${to}`,
     defaultChanged: (from: string, to: string) => `Đổi mặc định: ${from} → ${to}`,
+    run: (issue: string, model: string) => `Run ${issue} · ${model}`,
+    runNoIssue: (model: string) => `Run · ${model}`,
+    empty: "Chưa có sự kiện nào.",
     quotaReason: (time: string) => `hết token, reset ${time}`,
   }),
   editDialog: Object.freeze({

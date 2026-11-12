@@ -1747,6 +1747,22 @@ html:has(.paperclip-app-shell[data-mobile="true"] [data-task-chat-shell]) #root 
   animation: tc-live-ping var(--motion-approval-pulse) var(--motion-ease-standard) infinite;
 }
 
+/* Model-fallback hub: the live connection line flows toward the agent card. */
+@keyframes mf-line-flow {
+  to { stroke-dashoffset: -28; }
+}
+
+.mf-line-flow {
+  stroke-dasharray: 8 6;
+  animation: mf-line-flow calc(var(--motion-duration-deliberate) * 2) linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mf-line-flow {
+    animation: none;
+  }
+}
+
 .paperclip-markdown.task-chat-reasoning-markdown,
 .paperclip-markdown.task-chat-reasoning-markdown :is(h1, h2, h3, h4, h5, h6, strong) {
   font-size: inherit;

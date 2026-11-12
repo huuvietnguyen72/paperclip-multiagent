@@ -52,6 +52,8 @@ const descriptions: Record<AgentLocalDetailView, string> = {
   skills: "Choose the skills your agent brings to each task.",
   runtime:
     "Configure the harness, model, environment, and how your agent runs.",
+  connections:
+    "Live view of the agent’s model connections and automatic fallback.",
   secrets:
     "Manage environment variables, secret bindings, and credentials your agent can access.",
   tools: "Manage installed connections, available tools, and access policies.",
