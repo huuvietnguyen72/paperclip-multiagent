@@ -22,6 +22,7 @@ export { joinRequests } from "./join_requests.js";
 export { budgetPolicies } from "./budget_policies.js";
 export { budgetIncidents } from "./budget_incidents.js";
 export { agentConfigRevisions } from "./agent_config_revisions.js";
+export { agentModelFallbackStates } from "./agent_model_fallback_states.js";
 export { agentApiKeys } from "./agent_api_keys.js";
 export { agentRuntimeState } from "./agent_runtime_state.js";
 export { agentTaskSessions, agentSessionGoalActions } from "./agent_task_sessions.js";
@@ -278,3 +279,4 @@ export { issueThreadInteractionIdempotencyKeys } from "./issue_thread_interactio
 
 export { projectTaskExecutionPolicies, executionAdmissions, executionAdmissionProjectCharges } from "./execution_admissions.js";
 export { budgetEvaluationWork } from "./budget_evaluation_work.js";
+export { modelAccountExhaustions } from "./model_account_exhaustions.js";
