@@ -4,9 +4,12 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   USAGE_LIMIT_WATCHDOG_DEFAULT_SEC,
+  findCreatedSessions,
   findUsageLimitError,
   readOpenCodeLogTail,
   resolveOpenCodeLogPath,
+  resolveOpenCodeRunDirectory,
+  resolveUsageLimitCheckIntervalMs,
   resolveUsageLimitWatchdogSec,
   startUsageLimitWatchdog,
 } from "./usage-limit-watchdog.js";
@@ -100,7 +103,61 @@ describe("findUsageLimitError", () => {
   });
 });
 
+describe("findCreatedSessions", () => {
+  const WORKDIR = "/home/u/.paperclip/instances/default/isolated-workspaces/agent-1";
+  function createdLine(input: { at: string; id: string; directory: string }) {
+    return `timestamp=${input.at} level=INFO run=88363989 message=created id=${input.id} slug=neon-sailor version=1.18.34 projectID=global directory=${input.directory} path=agent-1 workspaceID=undefined parentID=undefined title="New session - ${input.at}" agent=undefined`;
+  }
+  const FLOOR = new Date("2026-11-04T21:21:50.000Z");
+
+  it("returns sessions created in exactly the run directory", () => {
+    const tail = [
+      // The real sample line, trimmed of its tail.
+      `timestamp=2026-11-04T21:21:58.113Z level=INFO run=88363989 message=created id=ses_e578f569effeDkCt4ubS3dqYuo slug=neon-sailor version=1.18.34 projectID=global directory=${WORKDIR}`,
+      createdLine({ at: "2026-11-04T21:22:00.000Z", id: "ses_sibling", directory: `${WORKDIR}-2` }),
+      createdLine({ at: "2026-11-04T21:22:00.000Z", id: "ses_parent", directory: path.posix.dirname(WORKDIR) }),
+      createdLine({ at: "2026-11-04T21:22:00.000Z", id: "ses_child", directory: `${WORKDIR}/sub` }),
+      createdLine({ at: "2026-11-04T21:22:01.000Z", id: "ses_second", directory: WORKDIR }),
+      `timestamp=2026-11-04T21:22:02.000Z level=INFO run=1 message=loop session.id=ses_loop directory=${WORKDIR}`,
+    ].join("\n");
+    expect(findCreatedSessions(tail, WORKDIR, FLOOR)).toEqual(["ses_e578f569effeDkCt4ubS3dqYuo", "ses_second"]);
+  });
+
+  it("ignores sessions created before the time floor", () => {
+    const tail = [
+      createdLine({ at: "2026-11-04T21:21:49.999Z", id: "ses_old", directory: WORKDIR }),
+      createdLine({ at: "2026-11-04T21:21:50.000Z", id: "ses_new", directory: WORKDIR }),
+    ].join("\n");
+    expect(findCreatedSessions(tail, WORKDIR, FLOOR)).toEqual(["ses_new"]);
+  });
+
+  it("matches a quoted directory that contains spaces", () => {
+    const spaced = "/home/u/My Projects/repo";
+    const tail = [
+      createdLine({ at: "2026-11-04T21:22:00.000Z", id: "ses_spaced", directory: JSON.stringify(spaced) }),
+      createdLine({ at: "2026-11-04T21:22:00.000Z", id: "ses_unquoted_prefix", directory: "/home/u/My" }),
+    ].join("\n");
+    expect(findCreatedSessions(tail, spaced, FLOOR)).toEqual(["ses_spaced"]);
+    expect(findCreatedSessions(tail, "/home/u/My", FLOOR)).toEqual(["ses_unquoted_prefix"]);
+  });
+});
+
+describe("resolveOpenCodeRunDirectory", () => {
+  it("returns the --dir OpenCode runs in, resolved against the process cwd", () => {
+    expect(resolveOpenCodeRunDirectory(["run", "--format", "json", "--dir", "/work/a"], "/cwd")).toBe("/work/a");
+    expect(resolveOpenCodeRunDirectory(["run", "--dir=rel/b"], "/cwd")).toBe(path.resolve("/cwd", "rel/b"));
+    expect(resolveOpenCodeRunDirectory(["run", "--", "--dir", "/ignored"], "/cwd")).toBeNull();
+    expect(resolveOpenCodeRunDirectory(["run"], "/cwd")).toBeNull();
+  });
+});
+
 describe("OpenCode log location and watchdog config", () => {
+  it("clamps the production check interval between 5 s and 30 s", () => {
+    expect(resolveUsageLimitCheckIntervalMs(0.3)).toBe(5_000);
+    expect(resolveUsageLimitCheckIntervalMs(10)).toBe(10_000);
+    expect(resolveUsageLimitCheckIntervalMs(300)).toBe(30_000);
+  });
+
   it("resolves the log under XDG_DATA_HOME, else HOME/.local/share", () => {
     expect(resolveOpenCodeLogPath({ XDG_DATA_HOME: "/data", HOME: "/home/a" }))
       .toBe(path.join("/data", "opencode", "log", "opencode.log"));
@@ -131,9 +188,16 @@ describe("startUsageLimitWatchdog", () => {
     vi.useRealTimers();
   });
 
-  function harness(input: { thresholdSec?: number; log?: () => string | null } = {}) {
+  function harness(input: {
+    thresholdSec?: number;
+    log?: () => string | null;
+    resumeSessionId?: string | null;
+    directory?: string | null;
+    checkIntervalMs?: number;
+    kill?: () => void;
+  } = {}) {
     const readLogTail = vi.fn(async () => input.log ? input.log() : null);
-    const kill = vi.fn();
+    const kill = vi.fn(input.kill ?? (() => {}));
     const onDetected = vi.fn();
     const onWarn = vi.fn();
     const watchdog = startUsageLimitWatchdog({
@@ -143,9 +207,111 @@ describe("startUsageLimitWatchdog", () => {
       kill,
       onDetected,
       onWarn,
+      ...(input.resumeSessionId !== undefined ? { resumeSessionId: input.resumeSessionId } : {}),
+      ...(input.directory !== undefined ? { directory: input.directory } : {}),
+      ...(input.checkIntervalMs !== undefined ? { checkIntervalMs: input.checkIntervalMs } : {}),
     });
     return { watchdog, readLogTail, kill, onDetected, onWarn };
   }
+
+  const WORKDIR = "/work/agent-1";
+  const createdAt = (offsetMs: number, id = SESSION, directory = WORKDIR) =>
+    `timestamp=${new Date(START + offsetMs).toISOString()} level=INFO run=1 message=created id=${id} slug=x version=1.18.34 projectID=global directory=${directory} title="New session"`;
+
+  it("discovers a brand-new session from the log when stdout stays empty", async () => {
+    const h = harness({
+      directory: WORKDIR,
+      log: () => [
+        createdAt(-60_000, "ses_beforeThisRun000000000000"),
+        lineFor({ at: new Date(START + 9_000).toISOString(), session: "ses_beforeThisRun000000000000" }),
+        createdAt(8_000, "ses_otherDirectory0000000000", "/work/agent-2"),
+        lineFor({ at: new Date(START + 9_000).toISOString(), session: "ses_otherDirectory0000000000" }),
+        createdAt(8_000),
+        lineFor({ at: new Date(START + 9_000).toISOString() }),
+      ].join("\n"),
+    });
+    await vi.advanceTimersByTimeAsync(300_000);
+    expect(h.kill).toHaveBeenCalledTimes(1);
+    expect(h.watchdog.detected()).toMatchObject({ sessionId: SESSION, sessionSource: "log_created" });
+  });
+
+  it("does not kill from the log when no session was created in the run directory", async () => {
+    const h = harness({
+      directory: WORKDIR,
+      log: () => [createdAt(8_000, SESSION, "/work/agent-2"), lineFor({ at: new Date(START + 9_000).toISOString() })].join("\n"),
+    });
+    await vi.advanceTimersByTimeAsync(400_000);
+    expect(h.readLogTail).toHaveBeenCalled();
+    expect(h.kill).not.toHaveBeenCalled();
+    h.watchdog.stop();
+  });
+
+  it("uses the seeded resume session when stdout stays empty", async () => {
+    const h = harness({ resumeSessionId: SESSION, log: () => lineFor({ at: new Date(START + 9_000).toISOString() }) });
+    expect(h.watchdog.sessionId()).toBe(SESSION);
+    await vi.advanceTimersByTimeAsync(300_000);
+    expect(h.kill).toHaveBeenCalledTimes(1);
+    expect(h.watchdog.detected()).toMatchObject({ sessionId: SESSION, sessionSource: "resume" });
+  });
+
+  it("prefers the stdout session over the seeded resume session", async () => {
+    const h = harness({ resumeSessionId: "ses_resumedButReplaced000000", log: () =>
+      lineFor({ at: new Date(START + 9_000).toISOString(), session: "ses_resumedButReplaced000000" }) });
+    h.watchdog.noteOutput("stdout", sessionEvent);
+    expect(h.watchdog.sessionId()).toBe(SESSION);
+    await vi.advanceTimersByTimeAsync(400_000);
+    expect(h.kill).not.toHaveBeenCalled();
+    h.watchdog.stop();
+  });
+
+  it("never matches a limit line from before this attempt started", async () => {
+    // lastOutputAt - 60 s would reach back to START - 60 s; the spawn floor does not.
+    const h = harness({ resumeSessionId: SESSION, log: () => lineFor({ at: new Date(START - 30_000).toISOString() }) });
+    await vi.advanceTimersByTimeAsync(400_000);
+    expect(h.readLogTail).toHaveBeenCalled();
+    expect(h.kill).not.toHaveBeenCalled();
+    h.watchdog.stop();
+  });
+
+  it("records the configured threshold and the measured silence", async () => {
+    const h = harness({ log: () => lineFor({ at: new Date(START + 25_000).toISOString() }) });
+    await vi.advanceTimersByTimeAsync(20_000);
+    h.watchdog.noteOutput("stdout", sessionEvent);
+    // Ticks at 300 s (280 s silent) do nothing; the 330 s tick finds 310 s of silence.
+    await vi.advanceTimersByTimeAsync(310_000);
+    expect(h.kill).toHaveBeenCalledTimes(1);
+    expect(h.watchdog.detected()).toMatchObject({ thresholdSec: 300, silenceSec: 310, sessionSource: "stdout" });
+  });
+
+  it("checks at least 5 s apart in production but accepts an injected interval", async () => {
+    const slow = harness({ thresholdSec: 1, resumeSessionId: SESSION, log: () => null });
+    await vi.advanceTimersByTimeAsync(4_999);
+    expect(slow.readLogTail).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(slow.readLogTail).toHaveBeenCalledTimes(1);
+    slow.watchdog.stop();
+
+    const fast = harness({ thresholdSec: 1, checkIntervalMs: 100, resumeSessionId: SESSION, log: () => null });
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(fast.readLogTail).toHaveBeenCalledTimes(1);
+    fast.watchdog.stop();
+  });
+
+  it("reports a failed kill with its own warning and still records the detection", async () => {
+    const h = harness({
+      resumeSessionId: SESSION,
+      log: () => lineFor({ at: new Date(START + 9_000).toISOString() }),
+      kill: () => { throw new Error("EPERM"); },
+    });
+    await vi.advanceTimersByTimeAsync(300_000);
+    expect(h.kill).toHaveBeenCalledTimes(1);
+    expect(h.watchdog.detected()).toMatchObject({ sessionId: SESSION });
+    expect(h.onDetected).toHaveBeenCalledTimes(1);
+    expect(h.onWarn).toHaveBeenCalledTimes(1);
+    expect(h.onWarn.mock.calls[0]![0]).toMatch(/could not stop/i);
+    expect(h.onWarn.mock.calls[0]![0]).not.toMatch(/could not be read/i);
+    expect(vi.getTimerCount()).toBe(0);
+  });
 
   it("(a) kills after 5 silent minutes when the log has a matching usage-limit error", async () => {
     const h = harness({ log: () => lineFor({ at: new Date(START + 290_000).toISOString() }) });

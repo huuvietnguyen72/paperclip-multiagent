@@ -69,10 +69,11 @@ import {
   OPENCODE_USAGE_LIMIT_ERROR_MESSAGE,
   readOpenCodeLogTail,
   resolveOpenCodeLogPath,
+  resolveOpenCodeRunDirectory,
   resolveUsageLimitWatchdogSec,
   startUsageLimitWatchdog,
   terminateLocalOpenCodeRun,
-  type UsageLimitMatch,
+  type UsageLimitDetection,
 } from "./usage-limit-watchdog.js";
 
 const __moduleDir = path.dirname(fileURLToPath(import.meta.url));
@@ -691,7 +692,14 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
           thresholdSec: usageLimitWatchdogSec,
           readLogTail: () => readOpenCodeLogTail(openCodeLogPath),
           kill: () => { usageLimitKill.cancel = terminateLocalOpenCodeRun(runId, graceSec); },
-          onWarn: (message) => console.warn(`[opencode-local] run ${runId}: ${message}`),
+          onWarn: (message) => {
+            console.warn(`[opencode-local] run ${runId}: ${message}`);
+            void Promise.resolve(onLog("stderr", `[paperclip] ${message}\n`)).catch(() => undefined);
+          },
+          // Before stdout names the session: the resumed id, else sessions the
+          // log shows OpenCode created for this attempt's --dir.
+          resumeSessionId,
+          directory: resolveOpenCodeRunDirectory(args, cwd),
         })
         : null;
       const processOnLog = usageLimitWatchdog
@@ -723,14 +731,11 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
         usageLimitWatchdog?.stop();
         usageLimitKill.cancel();
       }
-      const usageLimitMatch = usageLimitWatchdog?.detected() ?? null;
-      const usageLimit: { match: UsageLimitMatch; sessionId: string } | null = usageLimitMatch
-        ? { match: usageLimitMatch, sessionId: usageLimitWatchdog?.sessionId() ?? "" }
-        : null;
+      const usageLimit = usageLimitWatchdog?.detected() ?? null;
       if (usageLimit) {
         await onLog(
           "stderr",
-          `[paperclip] OpenCode produced no output for ${usageLimitWatchdogSec}s and its log reports a Go usage limit for session ${usageLimit.sessionId}; stopped the run as a provider usage-limit failure.\n`,
+          `[paperclip] OpenCode produced no output for ${usageLimit.silenceSec}s (configured threshold ${usageLimit.thresholdSec}s) and its log reports a Go usage limit for session ${usageLimit.sessionId}; stopped the run as a provider usage-limit failure.\n`,
         );
       }
       // Parse any unterminated final record before deciding whether its usage
@@ -757,7 +762,7 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
         proc: { exitCode: number | null; signal: string | null; timedOut: boolean; stdout: string; stderr: string; errorCode?: string | null };
         rawStderr: string;
         parsed: ReturnType<typeof parseOpenCodeJsonl>;
-        usageLimit?: { match: UsageLimitMatch; sessionId: string } | null;
+        usageLimit?: UsageLimitDetection | null;
       },
       clearSessionOnMissingSession = false,
     ): AdapterExecutionResult => {
@@ -783,8 +788,10 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
             errorFamily: "provider_quota",
             usageLimitWatchdog: {
               sessionId: attempt.usageLimit.sessionId,
-              logTimestamp: attempt.usageLimit.match.at.toISOString(),
-              silenceSec: usageLimitWatchdogSec,
+              sessionSource: attempt.usageLimit.sessionSource,
+              logTimestamp: attempt.usageLimit.at.toISOString(),
+              thresholdSec: attempt.usageLimit.thresholdSec,
+              silenceSec: attempt.usageLimit.silenceSec,
             },
           },
         };
