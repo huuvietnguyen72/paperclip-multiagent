@@ -66,7 +66,7 @@ function view(): AgentModelFallbackView {
     connections: [
       {
         id: "default", position: 1, isDefault: true, adapterType: "claude_local", model: "claude-sonnet-5-5",
-        aiConnection: null, accountKey: null, accountLabel: "Claude chính", exhaustedUntil: null,
+        aiConnection: null, accountKey: null, accountLabel: "Claude primary", exhaustedUntil: null,
         inUse: true, lastUsedAt: null, runsToday: 0, tokensToday: 0, quotaWindows: [],
       },
       {
@@ -141,10 +141,10 @@ describe("model fallback editing", () => {
 
   it("editing the default model patches the agent's adapterConfig.model", async () => {
     const root = await render();
-    await act(async () => (container.querySelector("[aria-label='Sửa kết nối 1']") as HTMLButtonElement).click());
+    await act(async () => (container.querySelector("[aria-label='Edit connection 1']") as HTMLButtonElement).click());
     await waitFor(() => expect(document.body.querySelector("select[aria-label=Model] option[value='claude-opus-5-5']")).not.toBeNull());
     await act(async () => setSelect(document.body.querySelector("select[aria-label=Model]") as HTMLSelectElement, "claude-opus-5-5"));
-    await act(async () => buttonByText("Lưu").click());
+    await act(async () => buttonByText("Save").click());
     await waitFor(() => expect(agentsMock.update).toHaveBeenCalledTimes(1));
     const [id, body, companyId] = agentsMock.update.mock.calls[0];
     expect(id).toBe("agent-1");
@@ -156,10 +156,10 @@ describe("model fallback editing", () => {
 
   it("adding opencode appends a connection", async () => {
     const root = await render();
-    await act(async () => buttonByText("Thêm tài khoản / provider").click());
-    await act(async () => buttonByText("Dùng tài khoản OpenCode Go").click());
+    await act(async () => buttonByText("Add account / provider").click());
+    await act(async () => buttonByText("Uses the OpenCode Go login").click());
     await waitFor(() => expect(document.body.querySelector("select[aria-label=Model] option[value='opencode-go/deepseek-v4.1-flash']")).not.toBeNull());
-    await act(async () => buttonByText("Thêm").click());
+    await act(async () => buttonByText("Add").click());
     await waitFor(() => expect(agentsMock.update).toHaveBeenCalledTimes(1));
     const body = agentsMock.update.mock.calls[0][1];
     const connections = body.runtimeConfig.modelFallback.connections;
@@ -174,18 +174,18 @@ describe("model fallback editing", () => {
 
   it("lists exactly three connection types in order", async () => {
     const root = await render();
-    await act(async () => buttonByText("Thêm tài khoản / provider").click());
+    await act(async () => buttonByText("Add account / provider").click());
     const labels = Array.from(document.body.querySelectorAll("button[aria-pressed]")).map(
       (b) => b.querySelector("span.font-medium")?.textContent?.trim(),
     );
-    expect(labels).toEqual(["OpenCode Go", "Tài khoản Claude khác", "Codex (OpenAI)"]);
-    expect(document.body.textContent).not.toContain("Sắp có");
+    expect(labels).toEqual(["OpenCode Go", "Another Claude account", "Codex (OpenAI)"]);
+    expect(document.body.textContent).not.toContain("Coming soon");
     await act(async () => root.unmount());
   });
 
   it("set default swaps configs", async () => {
     const root = await render();
-    await act(async () => buttonByText("Đặt mặc định").click());
+    await act(async () => buttonByText("Set as default").click());
     await waitFor(() => expect(agentsMock.update).toHaveBeenCalledTimes(1));
     const body = agentsMock.update.mock.calls[0][1];
     expect(body).toEqual({ ...swapDefault(agent as never, FALLBACK_ID), replaceAdapterConfig: true, expectedConfigurationRevision: "rev-1" });
@@ -199,22 +199,22 @@ describe("model fallback editing", () => {
 
   it("delete is hidden for the default", async () => {
     const root = await render();
-    await act(async () => (container.querySelector("[aria-label='Sửa kết nối 1']") as HTMLButtonElement).click());
+    await act(async () => (container.querySelector("[aria-label='Edit connection 1']") as HTMLButtonElement).click());
     await waitFor(() => expect(document.body.querySelector("[role=dialog]")).not.toBeNull());
-    expect(document.body.textContent).not.toContain("Xoá kết nối");
-    await act(async () => buttonByText("Huỷ").click());
+    expect(document.body.textContent).not.toContain("Remove connection");
+    await act(async () => buttonByText("Cancel").click());
     await waitFor(() => expect(document.body.querySelector("[role=dialog]")).toBeNull());
-    await act(async () => (container.querySelector("[aria-label='Sửa kết nối 2']") as HTMLButtonElement).click());
-    await waitFor(() => expect(document.body.textContent).toContain("Xoá kết nối"));
+    await act(async () => (container.querySelector("[aria-label='Edit connection 2']") as HTMLButtonElement).click());
+    await waitFor(() => expect(document.body.textContent).toContain("Remove connection"));
     await act(async () => root.unmount());
   });
 
   it("settings toggle patches enabled false", async () => {
     const root = await render();
-    await act(async () => buttonByText("Cài đặt chuyển đổi").click());
+    await act(async () => buttonByText("Switching settings").click());
     await waitFor(() => expect(document.body.querySelector("[role=switch]")).not.toBeNull());
     await act(async () => (document.body.querySelector("[role=switch]") as HTMLButtonElement).click());
-    await act(async () => buttonByText("Lưu").click());
+    await act(async () => buttonByText("Save").click());
     await waitFor(() => expect(agentsMock.update).toHaveBeenCalledTimes(1));
     expect(agentsMock.update.mock.calls[0][1].runtimeConfig.modelFallback.enabled).toBe(false);
     await act(async () => root.unmount());
@@ -222,10 +222,10 @@ describe("model fallback editing", () => {
 
   it("clearing effort on the default sends no effort, replaceAdapterConfig and the revision", async () => {
     const root = await render();
-    await act(async () => (container.querySelector("[aria-label='Sửa kết nối 1']") as HTMLButtonElement).click());
+    await act(async () => (container.querySelector("[aria-label='Edit connection 1']") as HTMLButtonElement).click());
     await waitFor(() => expect(document.body.querySelector("select[aria-label='Thinking effort']")).not.toBeNull());
     await act(async () => setSelect(document.body.querySelector("select[aria-label='Thinking effort']") as HTMLSelectElement, ""));
-    await act(async () => buttonByText("Lưu").click());
+    await act(async () => buttonByText("Save").click());
     await waitFor(() => expect(agentsMock.update).toHaveBeenCalledTimes(1));
     const body = agentsMock.update.mock.calls[0][1];
     expect(body.adapterConfig).toEqual({ model: "claude-sonnet-5-5", cwd: "/work" });
@@ -236,7 +236,7 @@ describe("model fallback editing", () => {
 
   it("set default replaces the adapterConfig and sends the revision", async () => {
     const root = await render();
-    await act(async () => buttonByText("Đặt mặc định").click());
+    await act(async () => buttonByText("Set as default").click());
     await waitFor(() => expect(agentsMock.update).toHaveBeenCalledTimes(1));
     const body = agentsMock.update.mock.calls[0][1];
     expect(body.replaceAdapterConfig).toBe(true);
@@ -246,11 +246,11 @@ describe("model fallback editing", () => {
 
   it("opencode offers the variant levels and saves variant", async () => {
     const root = await render();
-    await act(async () => (container.querySelector("[aria-label='Sửa kết nối 2']") as HTMLButtonElement).click());
+    await act(async () => (container.querySelector("[aria-label='Edit connection 2']") as HTMLButtonElement).click());
     await waitFor(() => expect(document.body.querySelector("select[aria-label='Thinking effort'] option[value=xhigh]")).not.toBeNull());
     expect(document.body.querySelector("select[aria-label='Thinking effort'] option[value=max]")).not.toBeNull();
     await act(async () => setSelect(document.body.querySelector("select[aria-label='Thinking effort']") as HTMLSelectElement, "xhigh"));
-    await act(async () => buttonByText("Lưu").click());
+    await act(async () => buttonByText("Save").click());
     await waitFor(() => expect(agentsMock.update).toHaveBeenCalledTimes(1));
     const body = agentsMock.update.mock.calls[0][1];
     expect(body.runtimeConfig.modelFallback.connections[0].adapterConfig).toEqual({ model: "opencode-go/glm-5.3", variant: "xhigh" });
@@ -303,8 +303,8 @@ describe("model fallback editing", () => {
   it("shows the server message when the save is rejected", async () => {
     agentsMock.update.mockRejectedValue(new Error("adapterConfig.model must be a non-empty string"));
     const root = await render();
-    await act(async () => (container.querySelector("[aria-label='Sửa kết nối 1']") as HTMLButtonElement).click());
-    await act(async () => buttonByText("Lưu").click());
+    await act(async () => (container.querySelector("[aria-label='Edit connection 1']") as HTMLButtonElement).click());
+    await act(async () => buttonByText("Save").click());
     await waitFor(() => expect(document.body.querySelector("[role=alert]")?.textContent).toContain("must be a non-empty string"));
     await act(async () => root.unmount());
   });

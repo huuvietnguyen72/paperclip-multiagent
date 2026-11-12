@@ -19,7 +19,7 @@ export interface ConnectionCardProps {
   now: Date;
   /** Extension point: when set, the card shows the edit (pencil) button. */
   onEdit?: (connection: FallbackConnection) => void;
-  /** Extension point: when set, non-default cards show "Đặt mặc định". */
+  /** Extension point: when set, non-default cards show "Set as default". */
   onSetDefault?: (connection: FallbackConnection) => void;
   /** Extension point: drag handle rendered before the position label (reorder). */
   dragHandle?: ReactNode;

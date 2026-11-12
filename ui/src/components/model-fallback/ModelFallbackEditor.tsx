@@ -16,7 +16,7 @@ import { ModelFallbackTab } from "./ModelFallbackTab";
 
 type Dialog = { kind: "edit"; connection: FallbackConnection } | { kind: "add" } | { kind: "settings" } | null;
 
-/** "Kết nối model" tab with the editing dialogs (edit, add, set default, reorder, settings) wired in. */
+/** "Model connections" tab with the editing dialogs (edit, add, set default, reorder, settings) wired in. */
 export function ModelFallbackEditor({ agent, companyId }: { agent: Agent; companyId: string }) {
   const queryClient = useQueryClient();
   const [dialog, setDialog] = useState<Dialog>(null);

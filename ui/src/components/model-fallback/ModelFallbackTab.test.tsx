@@ -47,7 +47,7 @@ function baseView(overrides: Partial<AgentModelFallbackView> = {}): AgentModelFa
     connections: [
       {
         id: "default", position: 1, isDefault: true, adapterType: "claude_local", model: "claude-opus-4-8",
-        aiConnection: null, accountKey: null, accountLabel: "Claude chính", exhaustedUntil: inFiveHours,
+        aiConnection: null, accountKey: null, accountLabel: "Claude primary", exhaustedUntil: inFiveHours,
         inUse: false, lastUsedAt: "2026-11-12T07:00:00.000Z", runsToday: 3, tokensToday: 1000, quotaWindows: [],
       },
       {
@@ -106,9 +106,9 @@ describe("ModelFallbackTab", () => {
     const root = await render();
     await waitFor(() => expect(container.querySelector("[data-testid=live-chip]")).not.toBeNull());
     const chip = container.querySelector("[data-testid=live-chip]")!;
-    expect(chip.textContent).toContain("Đang chạy");
+    expect(chip.textContent).toContain("Running");
     expect(chip.textContent).toContain("GLM 5.3");
-    expect(container.textContent).toContain("Dự phòng 1");
+    expect(container.textContent).toContain("Fallback 1");
     expect(mockApi.agentView).toHaveBeenCalledWith("agent-1", "company-1");
     await act(async () => root.unmount());
   });
@@ -121,7 +121,7 @@ describe("ModelFallbackTab", () => {
     await waitFor(() => expect(container.querySelector("[data-testid=live-chip]")).not.toBeNull());
     const chip = container.querySelector("[data-testid=live-chip]")!;
     expect(chip.textContent).toContain("GLM 5.3");
-    expect(chip.textContent).toContain("+1 kết nối khác");
+    expect(chip.textContent).toContain("+1 more");
     await act(async () => root.unmount());
   });
 
@@ -129,7 +129,7 @@ describe("ModelFallbackTab", () => {
     mockApi.agentView.mockResolvedValue(baseView());
     const root = await render();
     await waitFor(() => expect(container.querySelector("[data-testid=connection-default]")).not.toBeNull());
-    expect(container.querySelector("[data-testid=connection-default]")!.textContent).toContain("Hết token · còn 5g 28p");
+    expect(container.querySelector("[data-testid=connection-default]")!.textContent).toContain("Out of tokens · 5h 28m left");
     await act(async () => root.unmount());
   });
 
@@ -139,7 +139,7 @@ describe("ModelFallbackTab", () => {
     mockApi.agentView.mockResolvedValue(view);
     const root = await render();
     await waitFor(() => expect(container.querySelector("[data-testid=connection-default]")).not.toBeNull());
-    expect(container.textContent).toContain("quay về khi PAP-7 xong");
+    expect(container.textContent).toContain("returns when PAP-7 is done");
     await act(async () => root.unmount());
   });
 
@@ -158,7 +158,7 @@ describe("ModelFallbackTab", () => {
     let root = await render();
     await waitFor(() => expect(container.querySelector("[data-testid=live-chip]")).not.toBeNull());
     let chip = container.querySelector("[data-testid=live-chip]")!;
-    expect(chip.textContent).toContain("Đang chạy");
+    expect(chip.textContent).toContain("Running");
     expect(chip.querySelector("[data-pulse=true]")!.className).toContain("motion-safe:animate-pulse");
     await act(async () => root.unmount());
     container.innerHTML = "";
@@ -167,8 +167,8 @@ describe("ModelFallbackTab", () => {
     root = await render();
     await waitFor(() => expect(container.querySelector("[data-testid=live-chip]")).not.toBeNull());
     chip = container.querySelector("[data-testid=live-chip]")!;
-    expect(chip.textContent).not.toContain("Đang chạy");
-    expect(chip.textContent).toContain("Đang dùng");
+    expect(chip.textContent).not.toContain("Running");
+    expect(chip.textContent).toContain("In use");
     expect(chip.textContent).toContain("GLM 5.3");
     expect(chip.querySelector("[data-pulse=false]")!.className).not.toContain("animate-pulse");
     await act(async () => root.unmount());
@@ -185,13 +185,13 @@ describe("ModelFallbackTab", () => {
     await waitFor(() => expect(container.querySelectorAll("[data-testid=timeline-event]").length).toBe(2));
     const [run, sw] = [...container.querySelectorAll("[data-testid=timeline-event]")].map((el) => el.textContent ?? "");
     expect(run).toContain("GLM 5.3");
-    expect(run).toContain("Lỗi");
+    expect(run).toContain("Failed");
     expect(sw).toContain("PAP-7");
-    expect(sw).toContain("hết token, reset");
+    expect(sw).toContain("out of tokens, resets");
     await act(async () => root.unmount());
   });
 
-  it("maps timeline reason codes to Vietnamese and never shows the raw code", async () => {
+  it("maps timeline reason codes to English and never shows the raw code", async () => {
     const view = baseView();
     const codes = ["account_exhausted", "pinned_finished", "fallback_unavailable", "account_unavailable", "disabled", "weird_new_code"];
     view.timeline = codes.map((reason, index) => ({
@@ -201,10 +201,10 @@ describe("ModelFallbackTab", () => {
     const root = await render();
     await waitFor(() => expect(container.querySelectorAll("[data-testid=timeline-event]").length).toBe(codes.length));
     const text = container.querySelector("section[aria-label=\"" + strings.timeline.title + "\"]")!.textContent ?? "";
-    expect(text).toContain("task đã xong, mặc định đã reset");
-    expect(text).toContain("kết nối dự phòng không dùng được");
-    expect(text).toContain("tài khoản không dùng được");
-    expect(text).toContain("đã tắt tự động chuyển");
+    expect(text).toContain("task done and default reset");
+    expect(text).toContain("fallback unavailable");
+    expect(text).toContain("account unavailable");
+    expect(text).toContain("automatic switching turned off");
     expect(text).toContain(strings.timeline.reasonUnknown);
     for (const code of codes) expect(text).not.toContain(code);
     await act(async () => root.unmount());
@@ -214,7 +214,7 @@ describe("ModelFallbackTab", () => {
     mockApi.agentView.mockResolvedValue(withRunning(baseView()));
     const root = await render();
     await waitFor(() => expect(container.querySelector("[data-testid=live-chip]")).not.toBeNull());
-    expect(container.querySelector("[data-testid=live-chip]")!.textContent).toContain("Đang chạy·");
+    expect(container.querySelector("[data-testid=live-chip]")!.textContent).toContain("Running·");
     expect(strings.hub.setDefault.match(/☆/g)).toBeNull();
     await act(async () => root.unmount());
   });
@@ -224,9 +224,9 @@ describe("ModelFallbackTab", () => {
     const root = await render();
     await waitFor(() => expect(container.querySelector("[data-testid=connection-default]")).not.toBeNull());
     const def = container.querySelector("[data-testid=connection-default]")!.textContent ?? "";
-    expect(def).toContain("1 · Chính ★ Mặc định");
-    expect(def).toMatch(/Hết token · còn 5g 28p · reset \d{2}:\d{2}/);
-    expect(container.querySelector("[data-testid=connection-glm]")!.textContent).toContain("2 · Dự phòng");
+    expect(def).toContain("1 · Primary ★ Default");
+    expect(def).toMatch(/Out of tokens · 5h 28m left · resets \d{2}:\d{2}/);
+    expect(container.querySelector("[data-testid=connection-glm]")!.textContent).toContain("2 · Fallback");
     const agentCard = container.querySelector("[data-testid=agent-card]")!.textContent ?? "";
     expect(agentCard).toContain("Minh");
     expect(agentCard).toContain("engineer");
@@ -238,17 +238,17 @@ describe("ModelFallbackTab", () => {
   it("current task tile shows the issue and elapsed time", async () => {
     mockApi.agentView.mockResolvedValue(withRunning(baseView()));
     const root = await render();
-    await waitFor(() => expect(container.textContent).toContain("Task hiện tại"));
+    await waitFor(() => expect(container.textContent).toContain("Current task"));
     const text = container.textContent ?? "";
     expect(text).toContain("PAP-9");
-    expect(text).toContain("đã chạy 12p");
+    expect(text).toContain("running 12m");
     await act(async () => root.unmount());
   });
 
   it("surfaces load errors", async () => {
     mockApi.agentView.mockRejectedValue(new Error("boom"));
     const root = await render();
-    await waitFor(() => expect(container.textContent).toContain("Không tải được thông tin kết nối."));
+    await waitFor(() => expect(container.textContent).toContain("Could not load connection details."));
     await act(async () => root.unmount());
   });
 });

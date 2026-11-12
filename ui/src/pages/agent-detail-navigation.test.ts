@@ -28,10 +28,10 @@ describe("agent detail navigation", () => {
     expect(agentDetailViewLabel("instructions")).toBe("Identity");
   });
 
-  it("nav includes Kết nối model after Harness / Runtime", () => {
+  it("nav includes Model connections after Harness / Runtime", () => {
     const items = AGENT_DETAIL_NAVIGATION[0].items;
     const runtime = items.findIndex((item) => item.value === "runtime");
-    expect(items[runtime + 1]).toEqual({ value: "connections", label: "Kết nối model" });
+    expect(items[runtime + 1]).toEqual({ value: "connections", label: "Model connections" });
     expect(parseAgentDetailView("connections")).toBe("connections");
     expect(agentDetailHref("minh", "connections")).toBe("/agents/minh/connections");
   });

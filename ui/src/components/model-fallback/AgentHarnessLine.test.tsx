@@ -5,13 +5,13 @@ import { ModelBadge } from "@/components/office/ModelBadge";
 import { AgentHarnessLine } from "./AgentHarnessLine";
 
 describe("AgentHarnessLine", () => {
-  it("agent header shows fallback harness with Dự phòng tag", () => {
+  it("agent header shows fallback harness with Fallback tag", () => {
     const markup = renderToStaticMarkup(
       <AgentHarnessLine adapterType="codex_local" displayAdapterType="codex_local" model="gpt-5.5" isFallback />,
     );
     expect(markup).toContain("Codex");
     expect(markup).toContain("gpt-5.5");
-    expect(markup).toContain("Dự phòng");
+    expect(markup).toContain("Fallback");
   });
 
   it("shows no tag when the agent runs on its configured connection", () => {
@@ -19,7 +19,7 @@ describe("AgentHarnessLine", () => {
       <AgentHarnessLine adapterType="claude_local" displayAdapterType="claude_local" isFallback={false} />,
     );
     expect(markup).toContain("Claude");
-    expect(markup).not.toContain("Dự phòng");
+    expect(markup).not.toContain("Fallback");
     expect(markup).not.toContain("agent-harness-unknown");
   });
 
@@ -28,8 +28,8 @@ describe("AgentHarnessLine", () => {
       <AgentHarnessLine adapterType="claude_local" displayAdapterType="claude_local" isFallback={false} activeUnknown />,
     );
     expect(markup).toContain("data-testid=\"agent-harness-unknown\"");
-    expect(markup).toContain("Không rõ kết nối đang dùng");
-    expect(markup).not.toContain("Dự phòng");
+    expect(markup).toContain("Connection in use unknown");
+    expect(markup).not.toContain("Fallback");
   });
 });
 
@@ -38,7 +38,7 @@ describe("ModelBadge", () => {
   it("office badge shows a neutral hint when the in-use connection is unknown", () => {
     const markup = renderToStaticMarkup(<ModelBadge badge={badge} unknown />);
     expect(markup).toContain("data-testid=\"model-badge-unknown\"");
-    expect(markup).toContain("Không rõ kết nối đang dùng");
+    expect(markup).toContain("Connection in use unknown");
     expect(renderToStaticMarkup(<ModelBadge badge={badge} />)).not.toContain("model-badge-unknown");
   });
 });

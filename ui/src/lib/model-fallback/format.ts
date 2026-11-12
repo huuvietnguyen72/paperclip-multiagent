@@ -9,18 +9,18 @@ import { modelBadgeFor } from "@/lib/office/model-badge";
 
 export function formatRemaining(until: Date, now: Date): string {
   const minutes = Math.floor((until.getTime() - now.getTime()) / 60_000);
-  if (minutes < 1) return "còn <1p";
+  if (minutes < 1) return "<1m left";
   const hours = Math.floor(minutes / 60);
   const rest = minutes % 60;
-  return hours > 0 ? `còn ${hours}g ${rest}p` : `còn ${rest}p`;
+  return hours > 0 ? `${hours}h ${rest}m left` : `${rest}m left`;
 }
 
-/** "12p" / "1g 5p" elapsed since `from`. */
+/** "running 12m" / "running 1h 5m" elapsed since `from`. */
 export function formatElapsed(from: Date | string, now: Date): string {
   const start = typeof from === "string" ? new Date(from) : from;
   const minutes = Math.max(0, Math.floor((now.getTime() - start.getTime()) / 60_000));
   const hours = Math.floor(minutes / 60);
-  return hours > 0 ? `${hours}g ${minutes % 60}p` : `${minutes}p`;
+  return hours > 0 ? `running ${hours}h ${minutes % 60}m` : `running ${minutes}m`;
 }
 
 /** Local-time "HH:mm". */
@@ -54,7 +54,7 @@ export interface SwapDefaultBody {
   runtimeConfig: Record<string, unknown>;
 }
 
-/** PATCH body for "Đặt mặc định": the chosen fallback becomes the default and the old default takes its slot. */
+/** PATCH body for "Set as default": the chosen fallback becomes the default and the old default takes its slot. */
 export function swapDefault(agent: SwapAgent, connectionId: string): SwapDefaultBody {
   const runtimeConfig = { ...(agent.runtimeConfig ?? {}) } as Record<string, unknown>;
   const fallback = runtimeConfig.modelFallback as ModelFallbackConfig | undefined;

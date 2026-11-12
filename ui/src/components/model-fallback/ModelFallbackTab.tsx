@@ -156,7 +156,7 @@ function Body({ agent, view, now, props }: { agent: Agent; view: AgentModelFallb
   );
 }
 
-/** Agent tab "Kết nối model": live view of the agent's connection chain and fallback history. */
+/** Agent tab "Model connections": live view of the agent's connection chain and fallback history. */
 export function ModelFallbackTab(props: ModelFallbackTabProps) {
   const { agent, companyId } = props;
   const query = useQuery({

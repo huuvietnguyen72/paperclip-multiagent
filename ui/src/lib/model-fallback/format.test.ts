@@ -7,13 +7,13 @@ describe("model fallback format", () => {
 
   it("formatRemaining hours and minutes", () => {
     const now = new Date("2026-11-12T10:00:00Z");
-    expect(formatRemaining(new Date(now.getTime() + (5 * 60 + 28) * 60_000), now)).toBe("còn 5g 28p");
-    expect(formatRemaining(new Date(now.getTime() + 12 * 60_000), now)).toBe("còn 12p");
+    expect(formatRemaining(new Date(now.getTime() + (5 * 60 + 28) * 60_000), now)).toBe("5h 28m left");
+    expect(formatRemaining(new Date(now.getTime() + 12 * 60_000), now)).toBe("12m left");
   });
 
   it("formatRemaining under a minute", () => {
     const now = new Date("2026-11-12T10:00:00Z");
-    expect(formatRemaining(new Date(now.getTime() + 30_000), now)).toBe("còn <1p");
+    expect(formatRemaining(new Date(now.getTime() + 30_000), now)).toBe("<1m left");
   });
 
   it("connectionLabel prettifies opencode model", () => {
