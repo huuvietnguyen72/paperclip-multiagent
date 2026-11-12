@@ -13,7 +13,7 @@ const FALLBACK_ID = "11111111-1111-4111-8111-111111111111";
 const NEW_ID = "22222222-2222-4222-8222-222222222222";
 
 const mockApi = vi.hoisted(() => ({ agentView: vi.fn() }));
-const agentsMock = vi.hoisted(() => ({ update: vi.fn(), adapterModels: vi.fn(), testEnvironment: vi.fn() }));
+const agentsMock = vi.hoisted(() => ({ update: vi.fn(), adapterModels: vi.fn(), testEnvironment: vi.fn(), getConfiguration: vi.fn() }));
 vi.mock("@/api/model-fallback", () => ({ modelFallbackApi: mockApi }));
 vi.mock("@/api/agents", () => ({ agentsApi: agentsMock }));
 vi.mock("@/lib/uuid", () => ({ createUuid: () => "22222222-2222-4222-8222-222222222222" }));
@@ -101,6 +101,12 @@ describe("model fallback editing", () => {
     document.body.appendChild(container);
     mockApi.agentView.mockReset().mockResolvedValue(view());
     agentsMock.update.mockReset().mockResolvedValue({});
+    agentsMock.getConfiguration.mockReset().mockResolvedValue({
+      adapterType: agent.adapterType,
+      adapterConfig: agent.adapterConfig,
+      runtimeConfig: agent.runtimeConfig,
+      configurationRevision: "rev-1",
+    });
     agentsMock.testEnvironment.mockReset().mockResolvedValue({ status: "pass", checks: [] });
     agentsMock.adapterModels.mockReset().mockImplementation(async (_company: string, type: string) =>
       type === "opencode_local"
@@ -180,7 +186,7 @@ describe("model fallback editing", () => {
     await act(async () => buttonByText("Đặt mặc định").click());
     await waitFor(() => expect(agentsMock.update).toHaveBeenCalledTimes(1));
     const body = agentsMock.update.mock.calls[0][1];
-    expect(body).toEqual(swapDefault(agent as never, FALLBACK_ID));
+    expect(body).toEqual({ ...swapDefault(agent as never, FALLBACK_ID), replaceAdapterConfig: true, expectedConfigurationRevision: "rev-1" });
     expect(body.adapterType).toBe("opencode_local");
     await act(async () => root.unmount());
   });
@@ -210,6 +216,77 @@ describe("model fallback editing", () => {
     await waitFor(() => expect(agentsMock.update).toHaveBeenCalledTimes(1));
     expect(agentsMock.update.mock.calls[0][1].runtimeConfig.modelFallback.enabled).toBe(false);
     await act(async () => root.unmount());
+  });
+
+  it("clearing effort on the default sends no effort, replaceAdapterConfig and the revision", async () => {
+    const root = await render();
+    await act(async () => (container.querySelector("[aria-label='Sửa kết nối 1']") as HTMLButtonElement).click());
+    await waitFor(() => expect(document.body.querySelector("select[aria-label='Thinking effort']")).not.toBeNull());
+    await act(async () => setSelect(document.body.querySelector("select[aria-label='Thinking effort']") as HTMLSelectElement, ""));
+    await act(async () => buttonByText("Lưu").click());
+    await waitFor(() => expect(agentsMock.update).toHaveBeenCalledTimes(1));
+    const body = agentsMock.update.mock.calls[0][1];
+    expect(body.adapterConfig).toEqual({ model: "claude-sonnet-5-5", cwd: "/work" });
+    expect(body.replaceAdapterConfig).toBe(true);
+    expect(body.expectedConfigurationRevision).toBe("rev-1");
+    await act(async () => root.unmount());
+  });
+
+  it("set default replaces the adapterConfig and sends the revision", async () => {
+    const root = await render();
+    await act(async () => buttonByText("Đặt mặc định").click());
+    await waitFor(() => expect(agentsMock.update).toHaveBeenCalledTimes(1));
+    const body = agentsMock.update.mock.calls[0][1];
+    expect(body.replaceAdapterConfig).toBe(true);
+    expect(body.expectedConfigurationRevision).toBe("rev-1");
+    await act(async () => root.unmount());
+  });
+
+  it("opencode offers the variant levels and saves variant", async () => {
+    const root = await render();
+    await act(async () => (container.querySelector("[aria-label='Sửa kết nối 2']") as HTMLButtonElement).click());
+    await waitFor(() => expect(document.body.querySelector("select[aria-label='Thinking effort'] option[value=xhigh]")).not.toBeNull());
+    expect(document.body.querySelector("select[aria-label='Thinking effort'] option[value=max]")).not.toBeNull();
+    await act(async () => setSelect(document.body.querySelector("select[aria-label='Thinking effort']") as HTMLSelectElement, "xhigh"));
+    await act(async () => buttonByText("Lưu").click());
+    await waitFor(() => expect(agentsMock.update).toHaveBeenCalledTimes(1));
+    const body = agentsMock.update.mock.calls[0][1];
+    expect(body.runtimeConfig.modelFallback.connections[0].adapterConfig).toEqual({ model: "opencode-go/glm-5.3", variant: "xhigh" });
+    expect(body.adapterConfig).toBeUndefined();
+    expect(body.replaceAdapterConfig).toBeUndefined();
+    await act(async () => root.unmount());
+  });
+
+  it("reorder keeps the order after slot 1 and never drops connections", () => {
+    const A = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    const B = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+    const two = {
+      adapterType: "claude_local",
+      adapterConfig: { model: "m" },
+      runtimeConfig: {
+        modelFallback: {
+          enabled: true,
+          connections: [
+            { id: A, adapterType: "opencode_local", adapterConfig: { model: "a" } },
+            { id: B, adapterType: "codex_local", adapterConfig: { model: "b" } },
+          ],
+        },
+      },
+    };
+    const ids = (body: { runtimeConfig: Record<string, unknown> }) =>
+      (body.runtimeConfig.modelFallback as { connections: Array<{ id: string; adapterType: string }> }).connections;
+    // [B, default, A]: B becomes default, old default (new id) stays at slot 2, A at slot 3.
+    const first = reorderBody(two as never, [B, "default", A]);
+    expect(first.adapterType).toBe("codex_local");
+    expect(ids(first).map((c) => c.id)).toEqual([NEW_ID, A]);
+    expect(ids(first)[0].adapterType).toBe("claude_local");
+    // Default dragged to slot 3: [A, B, default] -> A default, then B, then old default.
+    const second = reorderBody(two as never, [A, B, "default"]);
+    expect(second.adapterType).toBe("opencode_local");
+    expect(ids(second).map((c) => c.id)).toEqual([B, NEW_ID]);
+    // Missing ids are appended, not dropped.
+    const third = reorderBody(two as never, ["default", B]);
+    expect(ids(third).map((c) => c.id)).toEqual([B, A]);
   });
 
   it("shows the server message when the save is rejected", async () => {

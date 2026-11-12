@@ -35,7 +35,7 @@ export interface AddConnectionDialogProps {
   agent: ChainAgent & { id: string; name: string };
   companyId: string;
   onClose: () => void;
-  save: (body: AgentPatchBody) => Promise<unknown>;
+  save: (build: (fresh: ChainAgent) => AgentPatchBody) => Promise<unknown>;
 }
 
 export function AddConnectionDialog({ agent, companyId, onClose, save }: AddConnectionDialogProps) {
@@ -72,7 +72,8 @@ export function AddConnectionDialog({ agent, companyId, onClose, save }: AddConn
     setBusy(true);
     setError(null);
     try {
-      await save(addConnectionBody(agent, build()));
+      const connection = build();
+      await save((fresh) => addConnectionBody(fresh, connection));
       onClose();
     } catch (caught) {
       setError(errorMessage(caught, strings.addDialog.addFailed));

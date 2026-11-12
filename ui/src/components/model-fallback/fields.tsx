@@ -59,15 +59,16 @@ export function ModelSelect({
   );
 }
 
-export function EffortSelect({ value, onChange }: { value: string; onChange: (effort: string) => void }) {
-  const levels = strings.editDialog.effortLevels;
+export function EffortSelect({ value, levels, onChange }: { value: string; levels: string[]; onChange: (effort: string) => void }) {
+  const labels = strings.editDialog.effortLevels;
+  const all = value && !levels.includes(value) ? [...levels, value] : levels;
   return (
     <FieldRow label={strings.editDialog.thinkingEffort} htmlFor="mf-effort">
       <NativeSelect id="mf-effort" aria-label={strings.editDialog.thinkingEffort} value={value} onChange={(event) => onChange(event.target.value)}>
         <option value="">{strings.editDialog.effortAuto}</option>
-        {Object.entries(levels).map(([key, label]) => (
+        {all.map((key) => (
           <option key={key} value={key}>
-            {label}
+            {labels[key] ?? key}
           </option>
         ))}
       </NativeSelect>

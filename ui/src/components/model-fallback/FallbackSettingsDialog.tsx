@@ -17,7 +17,7 @@ export interface FallbackSettingsDialogProps {
   /** Effective wait (minutes) shown when the agent has none stored. */
   noResetWaitMinutes: number;
   onClose: () => void;
-  save: (body: AgentPatchBody) => Promise<unknown>;
+  save: (build: (fresh: ChainAgent) => AgentPatchBody) => Promise<unknown>;
 }
 
 /** Auto-switch toggle, wait time when no reset time is known, and a keyboard-friendly chain order list. */
@@ -48,13 +48,15 @@ export function FallbackSettingsDialog({ agent, connections, noResetWaitMinutes,
     setBusy(true);
     setError(null);
     try {
-      const reordered: AgentPatchBody = orderChanged ? reorderBody(agent, order) : { runtimeConfig: agent.runtimeConfig ?? {} };
       const keepWait = stored.noResetWaitMinutes != null || waitNumber !== noResetWaitMinutes;
-      const settings = settingsBody(
-        { ...agent, runtimeConfig: reordered.runtimeConfig },
-        { enabled, ...(keepWait ? { noResetWaitMinutes: waitNumber } : {}) },
-      );
-      await save({ ...reordered, runtimeConfig: settings.runtimeConfig });
+      await save((fresh) => {
+        const reordered: AgentPatchBody = orderChanged ? reorderBody(fresh, order) : { runtimeConfig: fresh.runtimeConfig ?? {} };
+        const settings = settingsBody(
+          { ...fresh, runtimeConfig: reordered.runtimeConfig },
+          { enabled, ...(keepWait ? { noResetWaitMinutes: waitNumber } : {}) },
+        );
+        return { ...reordered, runtimeConfig: settings.runtimeConfig };
+      });
       onClose();
     } catch (caught) {
       setError(errorMessage(caught, strings.settingsDialog.saveFailed));

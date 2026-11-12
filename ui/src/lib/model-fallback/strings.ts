@@ -74,7 +74,7 @@ export const strings = Object.freeze({
     saving: "Đang lưu…",
     mainSuffix: " · Chính",
     effortAuto: "Auto",
-    effortLevels: Object.freeze({ low: "Thấp", medium: "Vừa", high: "Cao" }),
+    effortLevels: Object.freeze({ minimal: "Tối thiểu", low: "Thấp", medium: "Vừa", high: "Cao", xhigh: "Rất cao", max: "Tối đa", ultra: "Siêu cao" } as Record<string, string>),
     modelCurrent: "hiện tại",
     saveFailed: "Không lưu được thay đổi.",
   }),

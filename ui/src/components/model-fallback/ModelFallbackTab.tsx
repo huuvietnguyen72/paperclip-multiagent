@@ -22,6 +22,8 @@ export interface ModelFallbackTabProps {
   onSetDefault?: (connection: FallbackConnection) => void;
   onAddConnection?: () => void;
   onReorder?: (orderedIds: string[]) => void;
+  /** True while a chain save is in flight. */
+  busy?: boolean;
 }
 
 /** Connection the header chip shows: among in-use connections, the one whose latest run started most recently. */
@@ -141,6 +143,7 @@ function Body({ agent, view, now, props }: { agent: Agent; view: AgentModelFallb
             onSetDefault={props.onSetDefault}
             onAdd={props.onAddConnection}
             onReorder={props.onReorder}
+            busy={props.busy}
           />
         </div>
         <FallbackTimeline events={view.timeline} connections={connections} />

@@ -33,7 +33,16 @@ export interface ConnectionEdit {
 export function effortKeyFor(adapterType: string): string | null {
   if (adapterType === "claude_local") return "effort";
   if (adapterType === "codex_local") return "modelReasoningEffort";
+  if (adapterType === "opencode_local") return "variant";
   return null;
+}
+
+/** Levels each harness accepts (claude --effort, codex model_reasoning_effort, opencode --variant). */
+export function effortLevelsFor(adapterType: string): string[] {
+  if (adapterType === "claude_local") return ["low", "medium", "high", "xhigh", "max"];
+  if (adapterType === "codex_local") return ["minimal", "low", "medium", "high", "xhigh", "max", "ultra"];
+  if (adapterType === "opencode_local") return ["minimal", "low", "medium", "high", "xhigh", "max"];
+  return [];
 }
 
 export const OPENCODE_DEFAULT_MODEL = "opencode-go/deepseek-v4.1-flash";
@@ -140,17 +149,36 @@ export function sameBinding(a: AiRuntimeConnectionBinding | null | undefined, b:
   return JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
 }
 
-/** `orderedIds` is the whole chain, default first. Dropping a fallback on slot 1 sets it as the default. */
+/**
+ * `orderedIds` is the whole chain, default first. Dropping a fallback on slot 1 sets it as the default
+ * (the old default is demoted; its new id replaces "default" in the rest of the order). Connections missing
+ * from `orderedIds` are appended, never dropped.
+ */
 export function reorderBody(agent: ChainAgent, orderedIds: string[]): AgentPatchBody {
   const first = orderedIds[0];
-  if (first !== MODEL_FALLBACK_DEFAULT_CONNECTION_ID) return swapDefault(agent, first);
-  const fallback = readFallback(agent);
+  let base: AgentPatchBody | null = null;
+  let working = agent;
+  let rest = orderedIds.slice(1);
+  if (first !== MODEL_FALLBACK_DEFAULT_CONNECTION_ID) {
+    const originalIds = new Set(readFallback(agent).connections.map((connection) => connection.id));
+    base = swapDefault(agent, first);
+    working = { ...agent, runtimeConfig: base.runtimeConfig };
+    const demoted = readFallback(working).connections.find((connection) => !originalIds.has(connection.id));
+    rest = rest.map((id) => (id === MODEL_FALLBACK_DEFAULT_CONNECTION_ID && demoted ? demoted.id : id));
+  }
+  const fallback = readFallback(working);
   const byId = new Map(fallback.connections.map((connection) => [connection.id, connection] as const));
-  const connections = orderedIds
-    .slice(1)
-    .map((id) => byId.get(id))
-    .filter((connection): connection is ModelFallbackConnection => Boolean(connection));
-  return { runtimeConfig: withFallback(agent, { ...fallback, connections }) };
+  const ordered: ModelFallbackConnection[] = [];
+  for (const id of rest) {
+    const connection = byId.get(id);
+    if (connection) {
+      ordered.push(connection);
+      byId.delete(id);
+    }
+  }
+  const connections = [...ordered, ...byId.values()];
+  const runtimeConfig = withFallback(working, { ...fallback, connections });
+  return base ? { ...base, runtimeConfig } : { runtimeConfig };
 }
 
 export function settingsBody(agent: ChainAgent, settings: { enabled: boolean; noResetWaitMinutes?: number }): AgentPatchBody {

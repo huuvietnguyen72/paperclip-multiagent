@@ -27,10 +27,12 @@ export interface ConnectionHubProps {
   onAdd?: () => void;
   /** Called with the whole chain's ids in the new order (drag and drop). Dropping on slot 1 sets the default. */
   onReorder?: (orderedIds: string[]) => void;
+  /** True while a save is in flight: set-default, drag and add are disabled. */
+  busy?: boolean;
 }
 
-function SortableConnection({ connection, now, onEdit, onSetDefault }: Pick<ConnectionHubProps, "onEdit" | "onSetDefault"> & { connection: FallbackConnection; now: Date }) {
-  const { attributes, listeners, setNodeRef, setActivatorNodeRef, transform, transition, isDragging } = useSortable({ id: connection.id });
+function SortableConnection({ connection, now, onEdit, onSetDefault, busy }: Pick<ConnectionHubProps, "onEdit" | "onSetDefault" | "busy"> & { connection: FallbackConnection; now: Date }) {
+  const { attributes, listeners, setNodeRef, setActivatorNodeRef, transform, transition, isDragging } = useSortable({ id: connection.id, disabled: busy });
   return (
     <div
       ref={setNodeRef}
@@ -42,9 +44,11 @@ function SortableConnection({ connection, now, onEdit, onSetDefault }: Pick<Conn
         now={now}
         onEdit={onEdit}
         onSetDefault={onSetDefault}
+        busy={busy}
         dragHandle={
           <button
             type="button"
+            disabled={busy}
             ref={setActivatorNodeRef}
             aria-label={strings.hub.dragHandle(connection.position)}
             className="cursor-grab touch-none rounded-sm text-muted-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring"
@@ -60,14 +64,14 @@ function SortableConnection({ connection, now, onEdit, onSetDefault }: Pick<Conn
 }
 
 /** Agent card on the left, one card per connection on the right, SVG curves between them (md and up). */
-export function ConnectionHub({ agentName, agentAdapterType, agentRole, currentIssue, tokensToday, connections, now, onEdit, onSetDefault, onAdd, onReorder }: ConnectionHubProps) {
+export function ConnectionHub({ agentName, agentAdapterType, agentRole, currentIssue, tokensToday, connections, now, onEdit, onSetDefault, onAdd, onReorder, busy }: ConnectionHubProps) {
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
   );
   const handleDragEnd = (event: DragEndEvent) => {
     const { active, over } = event;
-    if (!onReorder || !over || active.id === over.id) return;
+    if (busy || !onReorder || !over || active.id === over.id) return;
     const ids = connections.map((connection) => connection.id);
     const from = ids.indexOf(String(active.id));
     const to = ids.indexOf(String(over.id));
@@ -154,20 +158,20 @@ export function ConnectionHub({ agentName, agentAdapterType, agentRole, currentI
             <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
               <SortableContext items={connections.map((connection) => connection.id)} strategy={verticalListSortingStrategy}>
                 {connections.map((connection) => (
-                  <SortableConnection key={connection.id} connection={connection} now={now} onEdit={onEdit} onSetDefault={onSetDefault} />
+                  <SortableConnection key={connection.id} connection={connection} now={now} onEdit={onEdit} onSetDefault={onSetDefault} busy={busy} />
                 ))}
               </SortableContext>
             </DndContext>
           ) : (
             connections.map((connection) => (
-              <ConnectionCard key={connection.id} connection={connection} now={now} onEdit={onEdit} onSetDefault={onSetDefault} />
+              <ConnectionCard key={connection.id} connection={connection} now={now} onEdit={onEdit} onSetDefault={onSetDefault} busy={busy} />
             ))
           )}
         </div>
       </div>
       {onAdd ? (
         <div className="mt-3 flex justify-end">
-          <Button type="button" variant="outline" size="sm" onClick={onAdd}>
+          <Button type="button" variant="outline" size="sm" disabled={busy} onClick={onAdd}>
             {strings.hub.addAccount}
           </Button>
         </div>

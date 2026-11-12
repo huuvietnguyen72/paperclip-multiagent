@@ -23,11 +23,13 @@ export interface ConnectionCardProps {
   onSetDefault?: (connection: FallbackConnection) => void;
   /** Extension point: drag handle rendered before the position label (reorder). */
   dragHandle?: ReactNode;
+  /** True while a save is in flight: the set-default button is disabled. */
+  busy?: boolean;
   className?: string;
 }
 
 /** One connection of the agent's chain: position, model, state, usage and (when exhausted) quota. */
-export function ConnectionCard({ connection, now, onEdit, onSetDefault, dragHandle, className }: ConnectionCardProps) {
+export function ConnectionCard({ connection, now, onEdit, onSetDefault, dragHandle, busy, className }: ConnectionCardProps) {
   const exhausted = isExhausted(connection, now);
   const badge = modelBadgeFor(connection.adapterType, connection.model);
   const position = connection.isDefault
@@ -70,7 +72,7 @@ export function ConnectionCard({ connection, now, onEdit, onSetDefault, dragHand
         <ModelBadge badge={badge} className="text-foreground" />
         <div className="flex shrink-0 items-center gap-1">
           {onSetDefault && !connection.isDefault ? (
-            <Button type="button" variant="ghost" size="xs" onClick={() => onSetDefault(connection)}>
+            <Button type="button" variant="ghost" size="xs" disabled={busy} onClick={() => onSetDefault(connection)}>
               <Star aria-hidden />
               {strings.hub.setDefault}
             </Button>

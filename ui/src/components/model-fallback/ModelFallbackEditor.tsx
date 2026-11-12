@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import type { Agent } from "@paperclipai/shared";
 import { agentsApi } from "@/api/agents";
@@ -21,6 +21,8 @@ export function ModelFallbackEditor({ agent, companyId }: { agent: Agent; compan
   const queryClient = useQueryClient();
   const [dialog, setDialog] = useState<Dialog>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const savingRef = useRef(false);
   const editable = agent.adapterType !== "paperclip_runner";
   const chainAgent = agent as unknown as ChainAgent & { id: string; name: string };
 
@@ -31,18 +33,39 @@ export function ModelFallbackEditor({ agent, companyId }: { agent: Agent; compan
     enabled: editable,
   });
 
-  const save = async (body: AgentPatchBody) => {
-    await agentsApi.update(agent.id, { ...body }, companyId);
-    await Promise.all([
-      queryClient.invalidateQueries({ queryKey: ["agents", "detail"] }),
-      queryClient.invalidateQueries({ queryKey: queryKeys.modelFallback.agent(agent.id) }),
-    ]);
+  // Builds the body from the freshly read configuration and sends its revision so a stale write is rejected.
+  const save = async (build: (fresh: ChainAgent) => AgentPatchBody) => {
+    if (savingRef.current) throw new Error(strings.editDialog.saveFailed);
+    savingRef.current = true;
+    setSaving(true);
+    try {
+      const current = await agentsApi.getConfiguration(agent.id, companyId);
+      const body = build(current as unknown as ChainAgent);
+      await agentsApi.update(
+        agent.id,
+        {
+          ...body,
+          ...(body.adapterConfig ? { replaceAdapterConfig: true } : {}),
+          expectedConfigurationRevision: current.configurationRevision,
+        },
+        companyId,
+      );
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["agents", "detail"] }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.modelFallback.agent(agent.id) }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.modelFallback.company(companyId) }),
+      ]);
+    } finally {
+      savingRef.current = false;
+      setSaving(false);
+    }
   };
 
-  const quick = async (build: () => AgentPatchBody, failure: string) => {
+  const quick = async (build: (fresh: ChainAgent) => AgentPatchBody, failure: string) => {
+    if (savingRef.current) return;
     setActionError(null);
     try {
-      await save(build());
+      await save(build);
     } catch (caught) {
       setActionError(errorMessage(caught, failure));
     }
@@ -64,9 +87,10 @@ export function ModelFallbackEditor({ agent, companyId }: { agent: Agent; compan
         companyId={companyId}
         onOpenSettings={() => setDialog({ kind: "settings" })}
         onEditConnection={(connection) => setDialog({ kind: "edit", connection })}
-        onSetDefault={(connection) => quick(() => swapDefault(chainAgent, connection.id), strings.editDialog.saveFailed)}
+        onSetDefault={(connection) => quick((fresh) => swapDefault(fresh, connection.id), strings.editDialog.saveFailed)}
         onAddConnection={() => setDialog({ kind: "add" })}
-        onReorder={(orderedIds) => quick(() => reorderBody(chainAgent, orderedIds), strings.hub.reorderFailed)}
+        busy={saving}
+        onReorder={(orderedIds) => quick((fresh) => reorderBody(fresh, orderedIds), strings.hub.reorderFailed)}
       />
       {dialog?.kind === "edit" ? (
         <EditConnectionDialog

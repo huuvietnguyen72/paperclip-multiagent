@@ -8,6 +8,7 @@ import {
   editDefaultBody,
   editFallbackBody,
   effortKeyFor,
+  effortLevelsFor,
   readFallback,
   removeFallbackBody,
   sameBinding,
@@ -25,7 +26,7 @@ export interface EditConnectionDialogProps {
   companyId: string;
   connection: FallbackConnection;
   onClose: () => void;
-  save: (body: AgentPatchBody) => Promise<unknown>;
+  save: (build: (fresh: ChainAgent) => AgentPatchBody) => Promise<unknown>;
 }
 
 /** Edits the default (the agent's own fields) or one fallback entry of the chain. */
@@ -47,11 +48,11 @@ export function EditConnectionDialog({ agent, companyId, connection, onClose, sa
   const [busy, setBusy] = useState(false);
   const options = useModelOptions(companyId, adapterType, currentModel);
 
-  const run = async (build: () => AgentPatchBody) => {
+  const run = async (build: (fresh: ChainAgent) => AgentPatchBody) => {
     setBusy(true);
     setError(null);
     try {
-      await save(build());
+      await save(build);
       onClose();
     } catch (caught) {
       setError(errorMessage(caught, strings.editDialog.saveFailed));
@@ -61,13 +62,13 @@ export function EditConnectionDialog({ agent, companyId, connection, onClose, sa
   };
 
   const onSave = () =>
-    run(() => {
+    run((fresh) => {
       const edit = {
         model,
         effort,
         ...(sameBinding(binding, initialBinding) ? {} : { aiConnection: binding ?? null }),
       };
-      return isDefault ? editDefaultBody(agent, edit) : editFallbackBody(agent, connection.id, edit);
+      return isDefault ? editDefaultBody(fresh, edit) : editFallbackBody(fresh, connection.id, edit);
     });
 
   const title = `${strings.editDialog.title(connection.position)}${isDefault ? strings.editDialog.mainSuffix : ""}`;
@@ -99,7 +100,7 @@ export function EditConnectionDialog({ agent, companyId, connection, onClose, sa
             )}
           </FieldRow>
           <ModelSelect options={options} value={model} onChange={setModel} currentModel={currentModel} />
-          {effortKey ? <EffortSelect value={effort} onChange={setEffort} /> : null}
+          {effortKey ? <EffortSelect value={effort} levels={effortLevelsFor(adapterType)} onChange={setEffort} /> : null}
           <DialogError message={error} />
         </div>
         <DialogFooter className="sm:justify-between">
@@ -110,7 +111,7 @@ export function EditConnectionDialog({ agent, companyId, connection, onClose, sa
                 variant="ghost"
                 className="text-destructive"
                 disabled={busy}
-                onClick={() => run(() => removeFallbackBody(agent, connection.id))}
+                onClick={() => run((fresh) => removeFallbackBody(fresh, connection.id))}
               >
                 {strings.editDialog.remove}
               </Button>
