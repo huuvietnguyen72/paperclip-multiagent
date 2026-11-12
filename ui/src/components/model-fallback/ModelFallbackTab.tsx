@@ -109,7 +109,7 @@ function Body({ agent, view, now, props }: { agent: Agent; view: AgentModelFallb
           value={currentIssue ?? currentTask?.identifier ?? strings.stats.none}
           hint={
             runningRun
-              ? strings.stats.elapsed(formatElapsed(runningRun.at, now))
+              ? formatElapsed(runningRun.at, now)
               : currentTask?.title
           }
           title={currentTask?.title}

@@ -20,7 +20,6 @@ export const strings = Object.freeze({
     currentTask: "Current task",
     switchesToday: "Switches today",
     default: "Default",
-    elapsed: (time: string) => `running ${time}`,
     tokens: (n: string) => `${n} tokens`,
     none: "—",
     returnWhen: (issues: string, time: string) => `returns when ${issues} is done and after ${time}`,

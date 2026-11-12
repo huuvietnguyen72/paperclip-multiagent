@@ -242,6 +242,7 @@ describe("ModelFallbackTab", () => {
     const text = container.textContent ?? "";
     expect(text).toContain("PAP-9");
     expect(text).toContain("running 12m");
+    expect(text).not.toContain("running running");
     await act(async () => root.unmount());
   });
 
