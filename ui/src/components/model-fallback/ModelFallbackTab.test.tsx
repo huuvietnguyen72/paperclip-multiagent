@@ -5,6 +5,7 @@ import { createRoot } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Agent, AgentModelFallbackView } from "@paperclipai/shared";
+import { strings } from "@/lib/model-fallback/strings";
 import { ModelFallbackTab } from "./ModelFallbackTab";
 
 const mockApi = vi.hoisted(() => ({ agentView: vi.fn() }));
@@ -187,6 +188,34 @@ describe("ModelFallbackTab", () => {
     expect(run).toContain("Lỗi");
     expect(sw).toContain("PAP-7");
     expect(sw).toContain("hết token, reset");
+    await act(async () => root.unmount());
+  });
+
+  it("maps timeline reason codes to Vietnamese and never shows the raw code", async () => {
+    const view = baseView();
+    const codes = ["account_exhausted", "pinned_finished", "fallback_unavailable", "account_unavailable", "disabled", "weird_new_code"];
+    view.timeline = codes.map((reason, index) => ({
+      at: `2026-11-12T0${index + 1}:00:00.000Z`, kind: "returned" as const, toModel: "claude-opus-4-8", reason,
+    }));
+    mockApi.agentView.mockResolvedValue(view);
+    const root = await render();
+    await waitFor(() => expect(container.querySelectorAll("[data-testid=timeline-event]").length).toBe(codes.length));
+    const text = container.querySelector("section[aria-label=\"" + strings.timeline.title + "\"]")!.textContent ?? "";
+    expect(text).toContain("task đã xong, mặc định đã reset");
+    expect(text).toContain("kết nối dự phòng không dùng được");
+    expect(text).toContain("tài khoản không dùng được");
+    expect(text).toContain("đã tắt tự động chuyển");
+    expect(text).toContain(strings.timeline.reasonUnknown);
+    for (const code of codes) expect(text).not.toContain(code);
+    await act(async () => root.unmount());
+  });
+
+  it("separates the chip label from the connection and shows the default star once", async () => {
+    mockApi.agentView.mockResolvedValue(withRunning(baseView()));
+    const root = await render();
+    await waitFor(() => expect(container.querySelector("[data-testid=live-chip]")).not.toBeNull());
+    expect(container.querySelector("[data-testid=live-chip]")!.textContent).toContain("Đang chạy·");
+    expect(strings.hub.setDefault.match(/☆/g)).toBeNull();
     await act(async () => root.unmount());
   });
 

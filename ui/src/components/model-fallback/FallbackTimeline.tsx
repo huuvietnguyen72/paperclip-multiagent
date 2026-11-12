@@ -56,7 +56,7 @@ export function FallbackTimeline({ events, connections }: { events: TimelineEven
                 {event.resetAt ? (
                   <div className="text-muted-foreground">{strings.timeline.quotaReason(formatClock(event.resetAt))}</div>
                 ) : event.reason ? (
-                  <div className="text-muted-foreground">{event.reason}</div>
+                  <div className="text-muted-foreground">{strings.timeline.reasons[event.reason] ?? strings.timeline.reasonUnknown}</div>
                 ) : null}
               </div>
             </li>

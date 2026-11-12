@@ -34,7 +34,7 @@ export const strings = Object.freeze({
     stateInUse: "● Đang dùng",
     stateExhausted: (remaining: string) => `Hết token · ${remaining}`,
     stateReady: "Sẵn sàng",
-    setDefault: "☆ Đặt mặc định",
+    setDefault: "Đặt mặc định",
     addAccount: "＋ Thêm tài khoản / provider",
     positionMainDefault: (n: number) => `${n} · Chính ★ Mặc định`,
     positionFallbackN: (n: number) => `${n} · Dự phòng`,
@@ -65,6 +65,14 @@ export const strings = Object.freeze({
       cancelled: "Huỷ",
     } as Record<string, string>),
     task: (issue: string) => `task ${issue}`,
+    reasons: Object.freeze({
+      account_exhausted: "hết token",
+      pinned_finished: "task đã xong, mặc định đã reset",
+      fallback_unavailable: "kết nối dự phòng không dùng được",
+      account_unavailable: "tài khoản không dùng được",
+      disabled: "đã tắt tự động chuyển",
+    } as Record<string, string>),
+    reasonUnknown: "lý do khác",
     quotaReason: (time: string) => `hết token, reset ${time}`,
   }),
   editDialog: Object.freeze({

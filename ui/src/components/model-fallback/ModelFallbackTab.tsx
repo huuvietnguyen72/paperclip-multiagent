@@ -78,6 +78,7 @@ function Body({ agent, view, now, props }: { agent: Agent; view: AgentModelFallb
                   className={cn("size-1.5 rounded-full bg-(--status-task-in_progress)", isRunning && "motion-safe:animate-pulse")}
                 />
                 <span>{isRunning ? strings.header.running : strings.header.inUse}</span>
+                <span aria-hidden>·</span>
                 <span>{connectionLabel(live.adapterType, live.model)}</span>
                 {liveCount > 1 ? <span className="text-muted-foreground">{strings.header.more(liveCount - 1)}</span> : null}
               </span>

@@ -6,6 +6,7 @@ import { GripVertical } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { AdapterMark } from "@/components/AdapterMark";
 import { strings } from "@/lib/model-fallback/strings";
+import { cardAnchors, curvePath } from "@/lib/model-fallback/hub-geometry";
 import { cn } from "@/lib/utils";
 import { ConnectionCard, isExhausted, type FallbackConnection } from "./ConnectionCard";
 
@@ -91,10 +92,10 @@ export function ConnectionHub({ agentName, agentAdapterType, agentRole, currentI
       const width = spacer.clientWidth || FALLBACK_SIZE.width;
       const height = spacer.clientHeight || FALLBACK_SIZE.height;
       setSize((previous) => (previous.width === width && previous.height === height ? previous : { width, height }));
-      const next = [...cards.children].map((child) => {
-        const element = child as HTMLElement;
-        return element.offsetTop + element.offsetHeight / 2;
-      });
+      const next = cardAnchors(
+        spacer.getBoundingClientRect(),
+        [...cards.children].map((child) => child.getBoundingClientRect()),
+      );
       setAnchors((previous) =>
         previous.length === next.length && previous.every((y, index) => y === next[index]) ? previous : next,
       );
@@ -108,7 +109,6 @@ export function ConnectionHub({ agentName, agentAdapterType, agentRole, currentI
   }, [connections.length]);
 
   const startY = size.height / 2;
-  const midX = size.width / 2;
 
   return (
     <section aria-label={strings.hub.title} className="rounded-lg border bg-card/50 p-4">
@@ -129,10 +129,10 @@ export function ConnectionHub({ agentName, agentAdapterType, agentRole, currentI
         </div>
 
         <div ref={spacerRef} className="relative hidden w-20 shrink-0 md:block" aria-hidden>
-          <svg className="absolute inset-0 size-full overflow-visible" width={size.width} height={size.height} fill="none">
+          <svg className="absolute inset-0 size-full" viewBox={`0 0 ${size.width} ${size.height}`} preserveAspectRatio="none" fill="none">
             {connections.map((connection, index) => {
               const endY = anchors[index] ?? ((index + 0.5) / connections.length) * size.height;
-              const d = `M0 ${startY} C${midX} ${startY} ${midX} ${endY} ${size.width} ${endY}`;
+              const d = curvePath({ x: 0, y: startY }, { x: size.width, y: endY });
               const exhausted = isExhausted(connection, now);
               return (
                 <path
@@ -153,7 +153,7 @@ export function ConnectionHub({ agentName, agentAdapterType, agentRole, currentI
           </svg>
         </div>
 
-        <div ref={cardsRef} className="flex min-w-0 flex-1 flex-col gap-3">
+        <div ref={cardsRef} className="relative flex min-w-0 flex-1 flex-col gap-3">
           {onReorder ? (
             <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
               <SortableContext items={connections.map((connection) => connection.id)} strategy={verticalListSortingStrategy}>
