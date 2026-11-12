@@ -1,4 +1,4 @@
-import { and, eq, inArray, isNotNull } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, sql, type AnyColumn, type SQL } from "drizzle-orm";
 import {
   agentModelFallbackStates,
   agents,
@@ -19,6 +19,8 @@ import {
 import { parseObject } from "../../adapters/utils.js";
 import { logger } from "../../middleware/logger.js";
 import { logActivity, publishActivity, type ActivityPublication } from "../activity-log.js";
+import { HttpError } from "../../errors.js";
+import { readAiConnectionConfigurationFailure } from "../ai-connection-configuration-failure.js";
 import { aiConnectionService } from "../ai-connections.js";
 import { issueService } from "../issues.js";
 import { boundRunIssueId } from "../run-task-binding.js";
@@ -142,7 +144,24 @@ async function pinnedIssuesFinished(db: DbOrTx, companyId: string, agentId: stri
     MODEL_FALLBACK_FINISHED_ISSUE_STATUSES.includes(row.status) || row.assigneeAgentId !== agentId);
 }
 
-type PendingComment = { issueId: string; runId: string; body: string; title: string };
+/** In the exhaustion upsert: the stored column while its reset is ahead of `at` and not earlier than the new one. */
+function keepStored(stored: AnyColumn, incoming: SQL, at: Date): SQL {
+  const until = modelAccountExhaustions.exhaustedUntil;
+  return sql`case when ${until} > ${at.toISOString()}::timestamptz and ${until} >= excluded.exhausted_until
+    then ${stored} else ${incoming} end`;
+}
+
+/**
+ * select() rejects a binding it cannot run with aiConnectionConfigurationFailure (and its
+ * credential-not-shared variant), which record a reason, or with a plain 403 for membership,
+ * ownership and install permission checks.
+ */
+function isSelectionRejection(error: unknown): boolean {
+  if (readAiConnectionConfigurationFailure(error) !== null) return true;
+  return error instanceof HttpError && error.status === 403;
+}
+
+type PendingComment ={ issueId: string; runId: string; body: string; title: string };
 
 export function createModelFallbackService(db: Db, deps: ModelFallbackServiceDeps = {}) {
   const now = deps.now ?? (() => new Date());
@@ -171,7 +190,16 @@ export function createModelFallbackService(db: Db, deps: ModelFallbackServiceDep
     try {
       const connectionId = await resolveAccountConnectionId(input);
       return connectionId ? `ai:${connectionId}` : null;
-    } catch {
+    } catch (error) {
+      // Only select()'s deliberate rejections mean "this connection cannot run"; anything else
+      // (a DB or pool failure, a bug) must not quietly switch the agent away from its default.
+      if (!isSelectionRejection(error)) throw error;
+      logger.warn({
+        companyId: input.companyId,
+        agentId: input.agentId,
+        entryId: input.entry.id,
+        reason: readAiConnectionConfigurationFailure(error) ?? "forbidden",
+      }, "model fallback connection cannot be selected");
       return null;
     }
   }
@@ -364,8 +392,34 @@ export function createModelFallbackService(db: Db, deps: ModelFallbackServiceDep
       })
       .onConflictDoUpdate({
         target: [modelAccountExhaustions.companyId, modelAccountExhaustions.accountKey],
-        set: { exhaustedUntil: retryAt, sourceRunId: run.id, parsedResetTime, updatedAt: at },
+        // A stored reset that is still ahead and later than this observation is kept, with its
+        // source and parsed flag: a concurrent failure without a reset time must not shorten it.
+        set: {
+          exhaustedUntil: keepStored(modelAccountExhaustions.exhaustedUntil, sql.raw("excluded.exhausted_until"), at),
+          sourceRunId: keepStored(modelAccountExhaustions.sourceRunId, sql.raw("excluded.source_run_id"), at),
+          parsedResetTime: keepStored(modelAccountExhaustions.parsedResetTime, sql.raw("excluded.parsed_reset_time"), at),
+          updatedAt: at,
+        },
       });
+
+    // Rule 12: a task that fails while the agent is already on a fallback also holds the agent there.
+    const failedIssueId = boundRunIssueId(run);
+    if (failedIssueId) {
+      const issueJson = JSON.stringify([failedIssueId]);
+      await db
+        .update(agentModelFallbackStates)
+        .set({
+          pinnedIssueIds: sql`case when ${agentModelFallbackStates.pinnedIssueIds} @> ${issueJson}::jsonb
+            then ${agentModelFallbackStates.pinnedIssueIds}
+            else ${agentModelFallbackStates.pinnedIssueIds} || ${issueJson}::jsonb end`,
+          updatedAt: at,
+        })
+        .where(and(
+          eq(agentModelFallbackStates.companyId, agent.companyId),
+          eq(agentModelFallbackStates.agentId, agent.id),
+          isNotNull(agentModelFallbackStates.activeConnectionId),
+        ));
+    }
 
     const chain = buildChain(agent);
     if (chain.length <= 1) return { retryNow: false };

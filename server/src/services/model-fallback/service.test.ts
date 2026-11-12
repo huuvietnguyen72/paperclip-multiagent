@@ -7,6 +7,8 @@ import { and, eq, sql } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { resolveExternalTestDatabaseUrl } from "../../__tests__/helpers/external-test-database.js";
 import { getEmbeddedPostgresTestSupport, startEmbeddedPostgresTestDatabase } from "../../__tests__/helpers/embedded-postgres.js";
+import { forbidden } from "../../errors.js";
+import { aiConnectionConfigurationFailure } from "../ai-connection-configuration-failure.js";
 import { aiConnectionService } from "../ai-connections.js";
 import { buildChain } from "./policy.js";
 import { createModelFallbackService } from "./service.js";
@@ -66,8 +68,8 @@ describePostgres("model fallback service", () => {
       assigneeAgentId: agentId, identifier });
     await db.insert(heartbeatRuns).values({ id: runId, companyId, agentId, issueId, invocationSource: "on_demand",
       status: "queued", runtimeMode: "legacy" });
-    const loadAgent = (id = agentId) => db.select().from(agents).where(eq(agents.id, id)).then((rows) => rows[0]!);
-    const loadRun = (id = runId) => db.select().from(heartbeatRuns).where(eq(heartbeatRuns.id, id)).then((rows) => rows[0]!);
+    const loadAgent = (id: string = agentId) => db.select().from(agents).where(eq(agents.id, id)).then((rows) => rows[0]!);
+    const loadRun = (id: string = runId) => db.select().from(heartbeatRuns).where(eq(heartbeatRuns.id, id)).then((rows) => rows[0]!);
     const newRun = async (forAgentId = agentId, forIssueId: string | null = issueId) => {
       const id = randomUUID();
       await db.insert(heartbeatRuns).values({ id, companyId, agentId: forAgentId, issueId: forIssueId,
@@ -89,7 +91,7 @@ describePostgres("model fallback service", () => {
     };
     const actions = (action: string) => db.select().from(activityLog)
       .where(and(eq(activityLog.companyId, companyId), eq(activityLog.action, action)));
-    const state = (id = agentId) => db.select().from(agentModelFallbackStates)
+    const state = (id: string = agentId) => db.select().from(agentModelFallbackStates)
       .where(and(eq(agentModelFallbackStates.companyId, companyId), eq(agentModelFallbackStates.agentId, id)))
       .then((rows) => rows[0] ?? null);
     const exhaustions = () => db.select().from(modelAccountExhaustions)
@@ -243,5 +245,82 @@ describePostgres("model fallback service", () => {
     const active = await service().readCompanyActive(s.companyId);
     expect(active).toEqual([{ agentId: s.agentId, connectionId: s.fallbackId, adapterType: "opencode_local",
       model: FALLBACK_MODEL, isFallback: true }]);
+  });
+
+  it("accountKeyFor returns null only for configuration rejections and propagates other errors", async () => {
+    const s = await seed();
+    const agent = await s.loadAgent();
+    const entry = buildChain(agent)[0]!;
+    const keyInput = { companyId: s.companyId, agentId: s.agentId, responsibleUserId: null, entry };
+    const rejecting = (error: Error) => createModelFallbackService(db, { now: () => clock,
+      resolveAccountConnectionId: async () => { throw error; } });
+    expect(await rejecting(aiConnectionConfigurationFailure("ai_connection_unavailable", "Reconnect")).accountKeyFor(keyInput))
+      .toBeNull();
+    expect(await rejecting(forbidden("This connection is not permitted for this agent")).accountKeyFor(keyInput)).toBeNull();
+    const transient = rejecting(new Error("connection pool timeout"));
+    await expect(transient.accountKeyFor(keyInput)).rejects.toThrow("connection pool timeout");
+    await expect(transient.selectForDispatch({ agent, run: await s.loadRun(), responsibleUserId: null }))
+      .rejects.toThrow("connection pool timeout");
+    expect(await s.state()).toBeNull();
+    expect(await s.actions("agent.model_fallback.switched")).toHaveLength(0);
+  });
+
+  it("a quota failure while on a fallback pins its issue, and the agent returns only after both finish", async () => {
+    const s = await seed();
+    const secondIssueId = randomUUID();
+    await db.insert(issues).values({ id: secondIssueId, companyId: s.companyId, title: "Second task", status: "in_progress",
+      assigneeAgentId: s.agentId, identifier: `${s.identifier}b` });
+    // Y's run started on the default before X failed.
+    const secondRun = await s.newRun(s.agentId, secondIssueId);
+    await switchToFallback(s);
+    expect((await s.state())?.pinnedIssueIds).toEqual([s.issueId]);
+
+    await db.update(heartbeatRuns).set({ status: "failed", errorCode: "provider_quota", error: "Claude usage limit reached",
+      resultJson: { message: "You've hit your limit · resets 20:00 (UTC)" },
+      runnerProfileJson: { adapterDispatch: { modelFallback: s.defaultRecord } } }).where(eq(heartbeatRuns.id, secondRun.id));
+    await service().recordQuotaFailure({ run: await s.loadRun(secondRun.id), agent: await s.loadAgent() });
+    const state = await s.state();
+    expect(state?.activeConnectionId).toBe(s.fallbackId);
+    expect(state?.pinnedIssueIds).toEqual([s.issueId, secondIssueId]);
+
+    await db.update(modelAccountExhaustions).set({ exhaustedUntil: new Date(clock.getTime() - 60_000) })
+      .where(eq(modelAccountExhaustions.companyId, s.companyId));
+    await db.update(issues).set({ status: "done" }).where(eq(issues.id, s.issueId));
+    const stillPinned = await service().selectForDispatch({ agent: await s.loadAgent(), run: await s.newRun(s.agentId, secondIssueId),
+      responsibleUserId: null });
+    expect(stillPinned.kind).toBe("stay");
+    await db.update(issues).set({ status: "in_review" }).where(eq(issues.id, secondIssueId));
+    const returned = await service().selectForDispatch({ agent: await s.loadAgent(), run: await s.newRun(), responsibleUserId: null });
+    expect(returned.kind).toBe("return");
+  });
+
+  it("an unparsed failure does not shorten a parsed reset that is still ahead", async () => {
+    const s = await seed();
+    const today = new Date();
+    clock = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate(), 8, 0, 0));
+    await service().recordQuotaFailure({ run: await s.failQuota(s.defaultRecord), agent: await s.loadAgent() });
+    const parsedReset = nextUtc20(clock).toISOString();
+    expect((await s.exhaustions())[0]).toMatchObject({ parsedResetTime: true });
+
+    const failUnparsed = async () => {
+      const run = await s.newRun();
+      await db.update(heartbeatRuns).set({ status: "failed", errorCode: "provider_quota", error: "Rate limited", resultJson: {},
+        runnerProfileJson: { adapterDispatch: { modelFallback: s.defaultRecord } } }).where(eq(heartbeatRuns.id, run.id));
+      await service().recordQuotaFailure({ run: await s.loadRun(run.id), agent: await s.loadAgent() });
+    };
+    await failUnparsed();
+    let rows = await s.exhaustions();
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.exhaustedUntil.toISOString()).toBe(parsedReset);
+    expect(rows[0]!.parsedResetTime).toBe(true);
+    expect(rows[0]!.sourceRunId).toBe(s.runId);
+
+    // Once the stored reset has passed, the new observation wins.
+    await db.update(modelAccountExhaustions).set({ exhaustedUntil: new Date(clock.getTime() - 60_000) })
+      .where(eq(modelAccountExhaustions.companyId, s.companyId));
+    await failUnparsed();
+    rows = await s.exhaustions();
+    expect(rows[0]!.exhaustedUntil.toISOString()).toBe(new Date(clock.getTime() + 60 * 60_000).toISOString());
+    expect(rows[0]!.parsedResetTime).toBe(false);
   });
 });
