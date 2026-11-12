@@ -2,8 +2,9 @@ import { useQuery } from "@tanstack/react-query";
 import type { Agent, AgentModelFallbackView } from "@paperclipai/shared";
 import { modelFallbackApi } from "@/api/model-fallback";
 import { Button } from "@/components/ui/button";
-import { connectionLabel, formatClock } from "@/lib/model-fallback/format";
+import { connectionLabel, formatClock, formatElapsed } from "@/lib/model-fallback/format";
 import { strings } from "@/lib/model-fallback/strings";
+import { cn } from "@/lib/utils";
 import { queryKeys } from "@/lib/queryKeys";
 import { isExhausted, type FallbackConnection } from "./ConnectionCard";
 import { ConnectionHub } from "./ConnectionHub";
@@ -30,9 +31,9 @@ export function pickLiveConnection(connections: FallbackConnection[]): FallbackC
   return live.reduce((best, connection) => (startedAt(connection) > startedAt(best) ? connection : best));
 }
 
-function Tile({ label, value, hint }: { label: string; value: string; hint?: string }) {
+function Tile({ label, value, hint, title }: { label: string; value: string; hint?: string; title?: string }) {
   return (
-    <div className="min-w-0 rounded-lg border bg-card p-3">
+    <div className="min-w-0 rounded-lg border bg-card p-3" title={title}>
       <div className="text-xs text-muted-foreground">{label}</div>
       <div className="mt-1 truncate text-sm font-medium text-foreground">{value}</div>
       {hint ? <div className="mt-0.5 truncate text-xs text-muted-foreground">{hint}</div> : null}
@@ -47,8 +48,13 @@ function Body({ agent, view, now, props }: { agent: Agent; view: AgentModelFallb
   const fallbackNumber = live && !live.isDefault ? connections.filter((c) => !c.isDefault && c.position <= live.position).length : null;
   const defaultConnection = connections.find((connection) => connection.isDefault) ?? null;
   const defaultExhausted = defaultConnection ? isExhausted(defaultConnection, now) : false;
+  const runningRun = [...view.timeline]
+    .filter((event) => event.kind === "run" && (event.status === "running" || event.status === "queued"))
+    .sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime())[0] ?? null;
+  const isRunning = runningRun !== null;
   const unfinished = view.pinnedIssues.filter((issue) => !issue.finished);
   const currentTask = unfinished[0] ?? null;
+  const currentIssue = runningRun?.issueIdentifier ?? null;
   const defaultLabel = defaultConnection ? connectionLabel(defaultConnection.adapterType, defaultConnection.model) : strings.stats.none;
   const resetClock = defaultConnection?.exhaustedUntil ? formatClock(defaultConnection.exhaustedUntil) : "";
 
@@ -63,8 +69,12 @@ function Body({ agent, view, now, props }: { agent: Agent; view: AgentModelFallb
                 data-testid="live-chip"
                 className="inline-flex items-center gap-1.5 rounded-full border border-(--status-task-in_progress) px-2 py-0.5 text-xs text-foreground"
               >
-                <span aria-hidden className="size-1.5 rounded-full bg-(--status-task-in_progress)" />
-                <span>{strings.header.running}</span>
+                <span
+                  aria-hidden
+                  data-pulse={isRunning ? "true" : "false"}
+                  className={cn("size-1.5 rounded-full bg-(--status-task-in_progress)", isRunning && "motion-safe:animate-pulse")}
+                />
+                <span>{isRunning ? strings.header.running : strings.header.inUse}</span>
                 <span>{connectionLabel(live.adapterType, live.model)}</span>
                 {liveCount > 1 ? <span className="text-muted-foreground">{strings.header.more(liveCount - 1)}</span> : null}
               </span>
@@ -92,8 +102,13 @@ function Body({ agent, view, now, props }: { agent: Agent; view: AgentModelFallb
         />
         <Tile
           label={strings.stats.currentTask}
-          value={currentTask ? currentTask.identifier : strings.stats.none}
-          hint={currentTask?.title}
+          value={currentIssue ?? currentTask?.identifier ?? strings.stats.none}
+          hint={
+            runningRun
+              ? strings.stats.elapsed(formatElapsed(runningRun.at, now))
+              : currentTask?.title
+          }
+          title={currentTask?.title}
         />
         <Tile
           label={strings.stats.switchesToday}
@@ -113,15 +128,18 @@ function Body({ agent, view, now, props }: { agent: Agent; view: AgentModelFallb
 
       <div className="grid gap-4 md:grid-cols-3">
         <div className="min-w-0 md:col-span-2">
-        <ConnectionHub
-          agentName={agent.name}
-          agentAdapterType={agent.adapterType}
-          connections={connections}
-          now={now}
-          onEdit={props.onEditConnection}
-          onSetDefault={props.onSetDefault}
-          onAdd={props.onAddConnection}
-        />
+          <ConnectionHub
+            agentName={agent.name}
+            agentAdapterType={agent.adapterType}
+            agentRole={agent.role}
+            currentIssue={currentIssue}
+            tokensToday={view.today.tokens}
+            connections={connections}
+            now={now}
+            onEdit={props.onEditConnection}
+            onSetDefault={props.onSetDefault}
+            onAdd={props.onAddConnection}
+          />
         </div>
         <FallbackTimeline events={view.timeline} connections={connections} />
       </div>

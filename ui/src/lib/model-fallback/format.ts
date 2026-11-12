@@ -15,6 +15,14 @@ export function formatRemaining(until: Date, now: Date): string {
   return hours > 0 ? `còn ${hours}g ${rest}p` : `còn ${rest}p`;
 }
 
+/** "12p" / "1g 5p" elapsed since `from`. */
+export function formatElapsed(from: Date | string, now: Date): string {
+  const start = typeof from === "string" ? new Date(from) : from;
+  const minutes = Math.max(0, Math.floor((now.getTime() - start.getTime()) / 60_000));
+  const hours = Math.floor(minutes / 60);
+  return hours > 0 ? `${hours}g ${minutes % 60}p` : `${minutes}p`;
+}
+
 /** Local-time "HH:mm". */
 export function formatClock(value: Date | string): string {
   const date = typeof value === "string" ? new Date(value) : value;

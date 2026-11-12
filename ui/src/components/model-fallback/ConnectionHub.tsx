@@ -10,6 +10,10 @@ const FALLBACK_SIZE = { width: 80, height: 200 };
 export interface ConnectionHubProps {
   agentName: string;
   agentAdapterType: string;
+  agentRole?: string;
+  /** Identifier of the issue the agent is working on right now. */
+  currentIssue?: string | null;
+  tokensToday?: number;
   /** Connections in chain order. */
   connections: FallbackConnection[];
   now: Date;
@@ -20,14 +24,11 @@ export interface ConnectionHubProps {
 }
 
 /** Agent card on the left, one card per connection on the right, SVG curves between them (md and up). */
-export function ConnectionHub({ agentName, agentAdapterType, connections, now, onEdit, onSetDefault, onAdd }: ConnectionHubProps) {
+export function ConnectionHub({ agentName, agentAdapterType, agentRole, currentIssue, tokensToday, connections, now, onEdit, onSetDefault, onAdd }: ConnectionHubProps) {
   const spacerRef = useRef<HTMLDivElement>(null);
   const cardsRef = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState(FALLBACK_SIZE);
   const [anchors, setAnchors] = useState<number[]>([]);
-
-  const fallbackNumbers = new Map<string, number>();
-  connections.filter((connection) => !connection.isDefault).forEach((connection, index) => fallbackNumbers.set(connection.id, index + 1));
 
   useEffect(() => {
     const spacer = spacerRef.current;
@@ -65,7 +66,11 @@ export function ConnectionHub({ agentName, agentAdapterType, connections, now, o
             <AdapterMark type={agentAdapterType} className="size-5 shrink-0" />
             <div className="min-w-0">
               <div className="truncate text-sm font-medium text-foreground">{agentName}</div>
-              <div className="text-xs text-muted-foreground">{strings.hub.agent}</div>
+              <div className="truncate text-xs text-muted-foreground">{agentRole ?? strings.hub.agent}</div>
+              {currentIssue ? <div className="truncate text-xs text-foreground">{strings.timeline.task(currentIssue)}</div> : null}
+              {tokensToday != null ? (
+                <div className="truncate text-xs text-muted-foreground">{strings.hub.agentTokens(tokensToday.toLocaleString("vi-VN"))}</div>
+              ) : null}
             </div>
           </div>
         </div>
@@ -100,7 +105,6 @@ export function ConnectionHub({ agentName, agentAdapterType, connections, now, o
             <ConnectionCard
               key={connection.id}
               connection={connection}
-              fallbackNumber={fallbackNumbers.get(connection.id) ?? null}
               now={now}
               onEdit={onEdit}
               onSetDefault={onSetDefault}

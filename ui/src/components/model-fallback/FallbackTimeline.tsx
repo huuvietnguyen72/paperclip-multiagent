@@ -12,18 +12,25 @@ function modelText(connections: Connections, model: string | null | undefined): 
   return match ? connectionLabel(match.adapterType, match.model) : modelBadgeFor("", model).label;
 }
 
+function withTask(text: string, event: TimelineEvent): string {
+  return event.issueIdentifier ? `${text} · ${strings.timeline.task(event.issueIdentifier)}` : text;
+}
+
 function eventText(event: TimelineEvent, connections: Connections): string {
   switch (event.kind) {
     case "switched":
-      return strings.timeline.switched(modelText(connections, event.fromModel), modelText(connections, event.toModel));
+      return withTask(strings.timeline.switched(modelText(connections, event.fromModel), modelText(connections, event.toModel)), event);
     case "returned":
-      return strings.timeline.returned(modelText(connections, event.toModel));
+      return withTask(strings.timeline.returned(modelText(connections, event.toModel)), event);
     case "default_changed":
       return strings.timeline.defaultChanged(modelText(connections, event.fromModel), modelText(connections, event.toModel));
-    default:
-      return event.issueIdentifier
+    default: {
+      const base = event.issueIdentifier
         ? strings.timeline.run(event.issueIdentifier, modelText(connections, event.model))
         : strings.timeline.runNoIssue(modelText(connections, event.model));
+      const result = event.status ? (strings.timeline.status[event.status] ?? event.status) : null;
+      return result ? `${base} · ${result}` : base;
+    }
   }
 }
 
@@ -48,6 +55,8 @@ export function FallbackTimeline({ events, connections }: { events: TimelineEven
                 <div className="text-foreground">{eventText(event, connections)}</div>
                 {event.resetAt ? (
                   <div className="text-muted-foreground">{strings.timeline.quotaReason(formatClock(event.resetAt))}</div>
+                ) : event.reason ? (
+                  <div className="text-muted-foreground">{event.reason}</div>
                 ) : null}
               </div>
             </li>

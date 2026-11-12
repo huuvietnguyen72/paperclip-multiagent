@@ -2,7 +2,7 @@ import { Pencil, Star } from "lucide-react";
 import type { AgentModelFallbackView } from "@paperclipai/shared";
 import { Button } from "@/components/ui/button";
 import { ModelBadge } from "@/components/office/ModelBadge";
-import { formatRemaining } from "@/lib/model-fallback/format";
+import { formatClock, formatRemaining } from "@/lib/model-fallback/format";
 import { strings } from "@/lib/model-fallback/strings";
 import { modelBadgeFor } from "@/lib/office/model-badge";
 import { cn } from "@/lib/utils";
@@ -16,7 +16,7 @@ export function isExhausted(connection: FallbackConnection, now: Date): boolean 
 export interface ConnectionCardProps {
   connection: FallbackConnection;
   /** 1-based number among the fallback connections; null for the default connection. */
-  fallbackNumber: number | null;
+  fallbackNumber?: number | null;
   now: Date;
   /** Extension point: when set, the card shows the edit (pencil) button. */
   onEdit?: (connection: FallbackConnection) => void;
@@ -26,10 +26,12 @@ export interface ConnectionCardProps {
 }
 
 /** One connection of the agent's chain: position, model, state, usage and (when exhausted) quota. */
-export function ConnectionCard({ connection, fallbackNumber, now, onEdit, onSetDefault, className }: ConnectionCardProps) {
+export function ConnectionCard({ connection, now, onEdit, onSetDefault, className }: ConnectionCardProps) {
   const exhausted = isExhausted(connection, now);
   const badge = modelBadgeFor(connection.adapterType, connection.model);
-  const position = connection.isDefault ? strings.hub.positionDefault : strings.header.fallbackTag(fallbackNumber ?? connection.position);
+  const position = connection.isDefault
+    ? strings.hub.positionMainDefault(connection.position + 1)
+    : strings.hub.positionFallbackN(connection.position + 1);
 
   return (
     <div
@@ -55,7 +57,7 @@ export function ConnectionCard({ connection, fallbackNumber, now, onEdit, onSetD
           {connection.inUse
             ? strings.hub.stateInUse
             : exhausted
-              ? strings.hub.stateExhausted(formatRemaining(new Date(connection.exhaustedUntil as string), now))
+              ? `${strings.hub.stateExhausted(formatRemaining(new Date(connection.exhaustedUntil as string), now))} · ${strings.hub.resetsAt(formatClock(connection.exhaustedUntil as string))}`
               : strings.hub.stateReady}
         </span>
       </div>
