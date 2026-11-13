@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import {
-  activityLog, agentModelFallbackStates, agents, companies, companyMemberships, createDb,
-  EMBEDDED_POSTGRES_TEST_TIMEOUT_MS, heartbeatRuns, issueComments, issues, modelAccountExhaustions, type Db,
+  activityLog, agentConfigRevisions, agentModelFallbackStates, agents, companies, companyMemberships, createDb,
+  EMBEDDED_POSTGRES_TEST_TIMEOUT_MS, heartbeatRuns, issueComments, issues, modelAccountExhaustions, toolApplications, toolConnections, type Db,
 } from "@paperclipai/db";
 import { and, eq, sql } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -246,6 +246,35 @@ describePostgres("model fallback service", () => {
     const active = await service().readCompanyActive(s.companyId);
     expect(active).toEqual([{ agentId: s.agentId, connectionId: s.fallbackId, adapterType: "opencode_local",
       model: FALLBACK_MODEL, isFallback: true }]);
+  });
+
+  it("an account-only default change is one default_changed event with both account labels; a chain-only change is none", async () => {
+    const s = await seed();
+    const [app] = await db.insert(toolApplications).values({ companyId: s.companyId, name: "Anthropic app", type: "mcp_http" }).returning();
+    const newConnectionId = randomUUID();
+    await db.insert(toolConnections).values([
+      { id: s.connectionId, companyId: s.companyId, applicationId: app!.id, name: "My Claude subscription", uid: randomUUID(), transport: "mcp_remote" },
+      { id: newConnectionId, companyId: s.companyId, applicationId: app!.id, name: "Anthropic", uid: randomUUID(), transport: "mcp_remote" },
+    ]);
+    const config = (aiConnection: unknown, modelFallback: unknown = null) => ({
+      adapterType: "claude_local",
+      adapterConfig: { model: DEFAULT_MODEL },
+      runtimeConfig: { aiConnection, ...(modelFallback ? { modelFallback } : {}) },
+    });
+    const bound = (connectionId: string) => ({ provider: "anthropic", method: "subscription", mode: "shared", connectionId, grantId: randomUUID() });
+    const oldBinding = bound(s.connectionId), newBinding = bound(newConnectionId);
+    await db.insert(agentConfigRevisions).values([
+      { companyId: s.companyId, agentId: s.agentId, source: "patch", beforeConfig: config(oldBinding),
+        afterConfig: config(newBinding), createdAt: new Date(clock.getTime() - 2_000) },
+      { companyId: s.companyId, agentId: s.agentId, source: "patch", beforeConfig: config(newBinding),
+        afterConfig: config(newBinding, { enabled: true, connections: [] }), createdAt: new Date(clock.getTime() - 1_000) },
+    ]);
+    const view = await service().readAgentView({ companyId: s.companyId, agentId: s.agentId, now: clock });
+    const changes = view.timeline.filter((event) => event.kind === "default_changed");
+    expect(changes).toHaveLength(1);
+    expect(changes[0]).toMatchObject({ fromAdapterType: "claude_local", toAdapterType: "claude_local",
+      fromAccountLabel: "My Claude subscription", toAccountLabel: "Anthropic" });
+    expect(changes[0]!.reason ?? null).toBeNull();
   });
 
   it("accountKeyFor returns null only for configuration rejections and propagates other errors", async () => {

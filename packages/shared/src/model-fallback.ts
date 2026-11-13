@@ -117,6 +117,11 @@ export interface AgentModelFallbackView {
     issueIdentifier?: string | null;
     fromModel?: string | null;
     toModel?: string | null;
+    /** default_changed only: the harness and account on each side of the change. */
+    fromAdapterType?: string | null;
+    toAdapterType?: string | null;
+    fromAccountLabel?: string | null;
+    toAccountLabel?: string | null;
     model?: string | null;
     durationMs?: number | null;
     reason?: string | null;

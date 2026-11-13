@@ -52,6 +52,7 @@ export const strings = Object.freeze({
     switched: (from: string, to: string) => `Switched ${from} → ${to}`,
     returned: (to: string) => `Returned to ${to}`,
     defaultChanged: (from: string, to: string) => `Default changed: ${from} → ${to}`,
+    withAccount: (label: string, account: string) => `${label} (${account})`,
     run: (issue: string, model: string) => `Run ${issue} · ${model}`,
     runNoIssue: (model: string) => `Run · ${model}`,
     empty: "No events yet.",

@@ -12,6 +12,17 @@ function modelText(connections: Connections, model: string | null | undefined): 
   return match ? connectionLabel(match.adapterType, match.model) : modelBadgeFor("", model).label;
 }
 
+/** "<Harness> · <Model>" for one side of a default change, plus " (<account>)" when the account is known. */
+function defaultSideText(
+  connections: Connections,
+  model: string | null | undefined,
+  adapterType: string | null | undefined,
+  accountLabel: string | null | undefined,
+): string {
+  const base = adapterType && model ? connectionLabel(adapterType, model) : modelText(connections, model);
+  return accountLabel ? strings.timeline.withAccount(base, accountLabel) : base;
+}
+
 function withTask(text: string, event: TimelineEvent): string {
   return event.issueIdentifier ? `${text} · ${strings.timeline.task(event.issueIdentifier)}` : text;
 }
@@ -23,7 +34,10 @@ function eventText(event: TimelineEvent, connections: Connections): string {
     case "returned":
       return withTask(strings.timeline.returned(modelText(connections, event.toModel)), event);
     case "default_changed":
-      return strings.timeline.defaultChanged(modelText(connections, event.fromModel), modelText(connections, event.toModel));
+      return strings.timeline.defaultChanged(
+        defaultSideText(connections, event.fromModel, event.fromAdapterType, event.fromAccountLabel),
+        defaultSideText(connections, event.toModel, event.toAdapterType, event.toAccountLabel),
+      );
     default: {
       const base = event.issueIdentifier
         ? strings.timeline.run(event.issueIdentifier, modelText(connections, event.model))
@@ -55,7 +69,7 @@ export function FallbackTimeline({ events, connections }: { events: TimelineEven
                 <div className="text-foreground">{eventText(event, connections)}</div>
                 {event.resetAt ? (
                   <div className="text-muted-foreground">{strings.timeline.quotaReason(formatClock(event.resetAt))}</div>
-                ) : event.reason ? (
+                ) : event.kind !== "default_changed" && event.reason ? (
                   <div className="text-muted-foreground">{strings.timeline.reasons[event.reason] ?? strings.timeline.reasonUnknown}</div>
                 ) : null}
               </div>

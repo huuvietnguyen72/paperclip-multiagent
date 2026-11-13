@@ -42,6 +42,11 @@ function readNumber(value: unknown): number {
   return typeof value === "number" && Number.isFinite(value) ? value : 0;
 }
 
+/** The connection a shared/delegated/router binding names; a responsible_user binding names none. */
+function bindingConnectionId(binding: unknown): string | null {
+  return readString(parseObject(binding).connectionId);
+}
+
 function entryModel(entry: ChainEntry): string | null {
   return readString(entry.adapterConfig.model);
 }
@@ -164,6 +169,16 @@ export async function readAgentModelFallbackView(
     if (issueId) issueIds.add(issueId);
   }
 
+  // Past default changes name their accounts by binding; resolve those names in the same connections query.
+  const revisionConnectionIds = new Set<string>();
+  for (const revision of revisions) {
+    for (const config of [revision.beforeConfig, revision.afterConfig]) {
+      const id = bindingConnectionId(parseObject(parseObject(config).runtimeConfig).aiConnection);
+      if (id) revisionConnectionIds.add(id);
+    }
+  }
+  const connectionNameIds = [...new Set([...aiConnectionIds, ...revisionConnectionIds])];
+
   const quotaUserId = input.userId ?? responsibleUserId;
   const [exhaustionRows, issueRows, connectionRows, quotaWindows] = await Promise.all([
     keys.length
@@ -175,9 +190,9 @@ export async function readAgentModelFallbackView(
         assigneeAgentId: issues.assigneeAgentId }).from(issues)
         .where(and(eq(issues.companyId, companyId), inArray(issues.id, [...issueIds])))
       : Promise.resolve([]),
-    aiConnectionIds.length
+    connectionNameIds.length
       ? db.select({ id: toolConnections.id, name: toolConnections.name }).from(toolConnections)
-        .where(and(eq(toolConnections.companyId, companyId), inArray(toolConnections.id, aiConnectionIds)))
+        .where(and(eq(toolConnections.companyId, companyId), inArray(toolConnections.id, connectionNameIds)))
       : Promise.resolve([]),
     quotaUserId && aiConnectionIds.length
       ? withTimeout(quotaWindowsByConnection(db, companyId, quotaUserId), QUOTA_WINDOW_TIMEOUT_MS).catch((error) => {
@@ -249,6 +264,14 @@ export async function readAgentModelFallbackView(
       resetAt: readString(details.resetAt),
     });
   }
+  // A responsible_user binding resolves per user; only the current default's own resolution is known here.
+  const currentBinding = JSON.stringify(chain[0]?.aiConnection ?? null);
+  const bindingAccountLabel = (binding: unknown): string | null => {
+    if (!binding) return null;
+    const id = bindingConnectionId(binding);
+    if (id) return connectionNames.get(id) ?? null;
+    return JSON.stringify(binding) === currentBinding ? connections[0]?.accountLabel ?? null : null;
+  };
   for (const revision of revisions) {
     const before = parseObject(revision.beforeConfig);
     const after = parseObject(revision.afterConfig);
@@ -262,7 +285,10 @@ export async function readAgentModelFallbackView(
       kind: "default_changed",
       fromModel: beforeModel,
       toModel: afterModel,
-      reason: revision.source,
+      fromAdapterType: readString(before.adapterType),
+      toAdapterType: readString(after.adapterType),
+      fromAccountLabel: bindingAccountLabel(parseObject(before.runtimeConfig).aiConnection),
+      toAccountLabel: bindingAccountLabel(parseObject(after.runtimeConfig).aiConnection),
     });
   }
   timeline.sort((a, b) => Date.parse(b.at) - Date.parse(a.at));

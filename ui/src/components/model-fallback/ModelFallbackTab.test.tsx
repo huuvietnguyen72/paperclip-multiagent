@@ -191,6 +191,26 @@ describe("ModelFallbackTab", () => {
     await act(async () => root.unmount());
   });
 
+  it("default-changed rows show the account on each side and no reason line", async () => {
+    const view = baseView();
+    view.timeline = [
+      { at: "2026-11-12T08:00:00.000Z", kind: "default_changed", fromModel: "claude-sonnet-5-5", toModel: "claude-sonnet-5-5",
+        fromAdapterType: "claude_local", toAdapterType: "claude_local",
+        fromAccountLabel: "My Claude subscription", toAccountLabel: "Anthropic" },
+      { at: "2026-11-12T09:00:00.000Z", kind: "default_changed", fromModel: "claude-opus-4-8", toModel: "claude-sonnet-5-5",
+        fromAdapterType: "claude_local", toAdapterType: "claude_local", fromAccountLabel: null, toAccountLabel: null },
+    ];
+    mockApi.agentView.mockResolvedValue(view);
+    const root = await render();
+    await waitFor(() => expect(container.querySelectorAll("[data-testid=timeline-event]").length).toBe(2));
+    const [modelOnly, accountOnly] = [...container.querySelectorAll("[data-testid=timeline-event]")].map((el) => el.textContent ?? "");
+    expect(accountOnly).toContain("Default changed: Claude Code · Sonnet 5.5 (My Claude subscription) → Claude Code · Sonnet 5.5 (Anthropic)");
+    expect(accountOnly).not.toContain(strings.timeline.reasonUnknown);
+    expect(modelOnly).toContain("Default changed: Claude Code · Opus 4.8 → Claude Code · Sonnet 5.5");
+    expect(modelOnly).not.toContain("(");
+    await act(async () => root.unmount());
+  });
+
   it("maps timeline reason codes to English and never shows the raw code", async () => {
     const view = baseView();
     const codes = ["account_exhausted", "pinned_finished", "fallback_unavailable", "account_unavailable", "disabled", "weird_new_code"];
