@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
-  buildChain, connectionExhaustedUntil, effectiveRunAgent, exhaustionKeys, modelScopedKey, selectConnection, type ChainEntry,
+  accountUnusableKey, buildChain, connectionExhaustedUntil, effectiveRunAgent, exhaustionKeys, modelScopedKey, selectConnection,
+  type ChainEntry,
 } from "./policy.js";
 
 const CONN_B = "11111111-1111-4111-8111-111111111111";
@@ -171,12 +172,40 @@ describe("model-scoped unusable keys", () => {
     expect(glmOut).toBe("login:opencode_local#model:opencode-go/glm-5.3");
   });
 
-  it("lists account and model keys for the exhaustion lookup", () => {
+  it("builds <accountKey>#unusable, separate from the account's quota exhaustion key", () => {
+    expect(accountUnusableKey("login:opencode_local")).toBe("login:opencode_local#unusable");
+  });
+
+  it("lists account, unusable-account and model keys for the exhaustion lookup", () => {
     expect(exhaustionKeys(sameAccountChain, keys)).toEqual([
-      "ai:a", "ai:a#model:default", "login:opencode_local", glmOut, "login:opencode_local#model:opencode-go/deepseek-v4",
+      "ai:a", "ai:a#unusable", "ai:a#model:default",
+      "login:opencode_local", "login:opencode_local#unusable", glmOut, "login:opencode_local#model:opencode-go/deepseek-v4",
     ]);
-    expect(exhaustionKeys(sameAccountChain, [null, null, "login:opencode_local"]))
-      .toEqual(["login:opencode_local", "login:opencode_local#model:opencode-go/deepseek-v4"]);
+    expect(exhaustionKeys(sameAccountChain, [null, null, "login:opencode_local"])).toEqual([
+      "login:opencode_local", "login:opencode_local#unusable", "login:opencode_local#model:opencode-go/deepseek-v4",
+    ]);
+  });
+
+  it("the default ignores unusable marks on its own account and model; only exhaustion counts (ruling P10)", () => {
+    // Another agent's fallback failure marked this agent's default account and model unusable.
+    const marks = new Map([["ai:a#unusable", later(1)], ["ai:a#model:default", later(1)]]);
+    expect(selectConnection({ chain: sameAccountChain, accountKeys: keys, exhaustedUntil: marks, activeConnectionId: null,
+      pinnedFinished: false, now })).toEqual({ index: 0, kind: "default" });
+    expect(selectConnection({ chain: sameAccountChain, accountKeys: keys, exhaustedUntil: marks, activeConnectionId: "glm",
+      pinnedFinished: true, now })).toEqual({ index: 0, kind: "return" });
+    expect(connectionExhaustedUntil(sameAccountChain[0]!, "ai:a", marks, true)).toBeUndefined();
+    // Quota exhaustion still makes the default unusable, exactly as before.
+    expect(selectConnection({ chain: sameAccountChain, accountKeys: keys, exhaustedUntil: new Map([["ai:a", later(1)]]),
+      activeConnectionId: null, pinnedFinished: false, now })).toEqual({ index: 1, kind: "switch" });
+  });
+
+  it("the same account as a fallback tier honours both unusable marks", () => {
+    const sharedAccount = [entry("default"), { ...entry("b"), adapterConfig: { model: "default" } }];
+    const both = ["ai:a", "ai:a"];
+    expect(selectConnection({ chain: sharedAccount, accountKeys: both, exhaustedUntil: new Map([["ai:a#unusable", later(1)]]),
+      activeConnectionId: "b", pinnedFinished: false, now })).toEqual({ index: 0, kind: "switch" });
+    expect(selectConnection({ chain: sharedAccount, accountKeys: both, exhaustedUntil: new Map([["ai:a#model:default", later(1)]]),
+      activeConnectionId: "b", pinnedFinished: false, now })).toEqual({ index: 0, kind: "switch" });
   });
 
   it("an unusable model blocks only that model; another model on the same account stays usable", () => {
@@ -198,7 +227,7 @@ describe("model-scoped unusable keys", () => {
   });
 
   it("an unusable account blocks every model on it", () => {
-    const exhaustedUntil = new Map([["login:opencode_local", later(1)]]);
+    const exhaustedUntil = new Map([[accountUnusableKey("login:opencode_local"), later(1)]]);
     expect(selectConnection({ chain: sameAccountChain, accountKeys: keys, exhaustedUntil, activeConnectionId: "glm",
       pinnedFinished: false, now })).toEqual({ index: 0, kind: "switch" });
   });

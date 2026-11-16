@@ -553,7 +553,8 @@ describe.skipIf(!support.supported)("model fallback heartbeat wiring", () => {
   });
 
   /** A claimed run on the given tier whose setup fails because its AI account must be reconnected. */
-  async function accountUnavailableSetupFailure(record: ModelFallbackDispatchRecord) {
+  async function accountUnavailableSetupFailure(record: ModelFallbackDispatchRecord,
+    configurationIncomplete: Record<string, unknown> = { reason: "ai_connection_unavailable", selectionFailure: "ai_connection_unavailable" }) {
     const { agent } = await seedAgent(fallbackRuntimeConfig());
     const [wake] = await db.insert(agentWakeupRequests).values({ companyId: agent.companyId, agentId: agent.id, source: "on_demand", status: "claimed" }).returning();
     const [run] = await db.insert(heartbeatRuns).values({ companyId: agent.companyId, agentId: agent.id, wakeupRequestId: wake.id,
@@ -562,7 +563,7 @@ describe.skipIf(!support.supported)("model fallback heartbeat wiring", () => {
     // The setup path chains .catch on the scheduled retry, like the real (async) scheduler.
     deps.scheduleBoundedRetryForRun.mockResolvedValue(null as never);
     const outerErr = new ConfigurationIncompleteFailure("Reconnect or validate the selected AI account",
-      { configurationIncomplete: { reason: "ai_connection_unavailable" } });
+      { configurationIncomplete });
     await createHeartbeatRunCompletion(db, deps).failRunSetup({ run, runId: run.id, outerErr, signal: new AbortController().signal,
       providerDispatchStarted: false, identityRedactor: createAgentIdentityRedactor(), readFailureReportSecrets: () => [] });
     const [failed] = await db.select().from(heartbeatRuns).where(eq(heartbeatRuns.id, run.id));
@@ -572,7 +573,7 @@ describe.skipIf(!support.supported)("model fallback heartbeat wiring", () => {
 
   it("a fallback-tier account that must be reconnected is marked and the run retries immediately", async () => {
     const f = await accountUnavailableSetupFailure(fallbackRecord());
-    expect(await exhaustionKeysOf(f.agent.companyId)).toEqual(["login:opencode_local"]);
+    expect(await exhaustionKeysOf(f.agent.companyId)).toEqual(["login:opencode_local#unusable"]);
     expect(f.deps.scheduleBoundedRetryForRun).toHaveBeenCalledOnce();
     expect(f.deps.scheduleBoundedRetryForRun).toHaveBeenCalledWith(expect.objectContaining({ id: f.run.id }),
       expect.objectContaining({ id: f.agent.id }), switchRetryOptions(f.agent));
@@ -581,6 +582,15 @@ describe.skipIf(!support.supported)("model fallback heartbeat wiring", () => {
 
   it("the same setup failure on the default tier keeps the legacy path", async () => {
     const f = await accountUnavailableSetupFailure(defaultTierRecord());
+    expect(await exhaustionKeysOf(f.agent.companyId)).toEqual([]);
+    expect(f.deps.scheduleBoundedRetryForRun).not.toHaveBeenCalled();
+    expect(f.deps.scheduleInteractionContinuationInfrastructureRetryIfEligible).toHaveBeenCalledOnce();
+  });
+
+  it("a catch-all AI configuration failure on a fallback tier is not an account mark", async () => {
+    // execution-configuration wraps every non-busy runtime preparation error under this reason; without a select()
+    // account rejection it may be env routing, project auth, a membership 403 or credential I/O.
+    const f = await accountUnavailableSetupFailure(fallbackRecord(), { reason: "ai_connection_unavailable" });
     expect(await exhaustionKeysOf(f.agent.companyId)).toEqual([]);
     expect(f.deps.scheduleBoundedRetryForRun).not.toHaveBeenCalled();
     expect(f.deps.scheduleInteractionContinuationInfrastructureRetryIfEligible).toHaveBeenCalledOnce();

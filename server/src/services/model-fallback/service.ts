@@ -31,7 +31,8 @@ import {
 } from "../recovery/provider-quota-retry-at.js";
 import { classifyFallbackFailure, type FallbackFailureKind } from "./classify.js";
 import {
-  buildChain, exhaustionKeys, modelScopedKey, readDispatchRecord, selectConnection, type ChainEntry, type ModelFallbackSelectionKind,
+  accountUnusableKey, buildChain, exhaustionKeys, modelScopedKey, readDispatchRecord, selectConnection, type ChainEntry,
+  type ModelFallbackSelectionKind,
 } from "./policy.js";
 import { readAgentModelFallbackView } from "./view.js";
 
@@ -169,31 +170,22 @@ async function pinnedIssuesFinished(db: DbOrTx, companyId: string, agentId: stri
 type SwitchReason = "account_exhausted" | "account_unavailable" | FallbackFailureKind;
 
 /**
- * Why the agent leaves `from`. Only an unusable mark writes an account+model row; an account row is an exhaustion unless
- * the fallback run that wrote it failed because the account itself cannot run.
+ * Why the agent leaves `from`, read from the key that blocks it: the account key is quota exhaustion; `#unusable` and
+ * `#model:` are unusable marks, which only a fallback tier honours (ruling P10).
  */
-async function switchReason(
-  db: DbOrTx,
-  companyId: string,
+function switchReason(
   from: ChainEntry,
   fromKey: string | null,
+  isDefault: boolean,
   exhaustedUntil: Map<string, Date>,
   at: Date,
-): Promise<{ reason: SwitchReason; resetAt: Date | null }> {
+): { reason: SwitchReason; resetAt: Date | null } {
   if (!fromKey) return { reason: "account_unavailable", resetAt: null };
   const ahead = (until: Date | undefined): until is Date => until !== undefined && until.getTime() > at.getTime();
   const accountUntil = exhaustedUntil.get(fromKey);
-  if (ahead(accountUntil)) {
-    const source = await db
-      .select({ errorCode: heartbeatRuns.errorCode, error: heartbeatRuns.error, resultJson: heartbeatRuns.resultJson,
-        runnerProfileJson: heartbeatRuns.runnerProfileJson })
-      .from(modelAccountExhaustions)
-      .innerJoin(heartbeatRuns, and(eq(heartbeatRuns.id, modelAccountExhaustions.sourceRunId), eq(heartbeatRuns.companyId, companyId)))
-      .where(and(eq(modelAccountExhaustions.companyId, companyId), eq(modelAccountExhaustions.accountKey, fromKey)))
-      .then((rows) => rows[0] ?? null);
-    if (source && classifyFallbackFailure(source)?.kind === "account_unusable") return { reason: "account_unusable", resetAt: null };
-    return { reason: "account_exhausted", resetAt: accountUntil };
-  }
+  if (ahead(accountUntil)) return { reason: "account_exhausted", resetAt: accountUntil };
+  if (isDefault) return { reason: "account_unavailable", resetAt: null };
+  if (ahead(exhaustedUntil.get(accountUnusableKey(fromKey)))) return { reason: "account_unusable", resetAt: null };
   const model = entryModel(from);
   if (model && ahead(exhaustedUntil.get(modelScopedKey(fromKey, model)))) return { reason: "model_unusable", resetAt: null };
   return { reason: "account_unavailable", resetAt: null };
@@ -397,7 +389,7 @@ export function createModelFallbackService(db: Db, deps: ModelFallbackServiceDep
         if (kind === "switch") {
           const from = chain[fromIndex]!;
           const to = chain[selection.index]!;
-          const { reason, resetAt } = await switchReason(tx, agent.companyId, from, accountKeys[fromIndex] ?? null, exhaustedUntil, at);
+          const { reason, resetAt } = switchReason(from, accountKeys[fromIndex] ?? null, fromIndex === 0, exhaustedUntil, at);
           const unusable = reason === "model_unusable" || reason === "account_unusable" ? reason : undefined;
           patch = {
             activeConnectionId: to.id,
@@ -526,10 +518,11 @@ export function createModelFallbackService(db: Db, deps: ModelFallbackServiceDep
     if (!classification) return { retryNow: false };
 
     const at = now();
-    // Without a recorded model (the harness's own default) the account key is the narrowest key the chain can see.
+    // Marks never use the plain account key (that is quota exhaustion, which another agent's default honours). Without a
+    // recorded model (the harness's own default) the account mark is the narrowest key the chain can see.
     const accountKey = classification.kind === "model_unusable" && record.model
       ? modelScopedKey(record.accountKey, record.model)
-      : record.accountKey;
+      : accountUnusableKey(record.accountKey);
     const retryAt = new Date(at.getTime() + noResetBackoffMs(agent));
     await markExhausted({ run, accountKey, retryAt, parsedResetTime: false, at });
     await pinFailedIssueWhileOnFallback(run, agent, at);

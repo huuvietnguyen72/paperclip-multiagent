@@ -98,9 +98,18 @@ export function applyModelFallbackDispatch<A extends AgentLike>(
   return { agent: record.isFallback ? effectiveRunAgent(agent, entry) : agent, missing: false };
 }
 
-/** The exhaustion key that blocks one model on an account (a model the provider refuses), not the whole account. */
+// Unusable marks (a fallback connection that cannot run) live under their own keys, apart from the plain account key
+// that quota exhaustion uses. Marks are company rows, so another agent's default may share the account or model; the
+// default never reads them (ruling P10).
+
+/** Blocks one model on an account (a model the provider refuses), not the whole account. */
 export function modelScopedKey(accountKey: string, model: string): string {
   return `${accountKey}#model:${model}`;
+}
+
+/** Blocks every model on an account that cannot authenticate or was revoked. */
+export function accountUnusableKey(accountKey: string): string {
+  return `${accountKey}#unusable`;
 }
 
 function chainEntryModel(entry: Pick<ChainEntry, "adapterConfig">): string | null {
@@ -108,31 +117,42 @@ function chainEntryModel(entry: Pick<ChainEntry, "adapterConfig">): string | nul
   return typeof model === "string" && model.trim().length > 0 ? model : null;
 }
 
-/** Every key whose exhaustion row can block a chain entry: its account key and its account+model key. */
+/** The keys a connection honours: the account (quota) key always; the unusable marks only on a fallback tier. */
+function connectionKeys(entry: Pick<ChainEntry, "adapterConfig">, accountKey: string, isDefault: boolean): string[] {
+  if (isDefault) return [accountKey];
+  const model = chainEntryModel(entry);
+  return [accountKey, accountUnusableKey(accountKey), ...(model ? [modelScopedKey(accountKey, model)] : [])];
+}
+
+/** Every key whose exhaustion row can block a chain entry (see connectionKeys), for one lookup. */
 export function exhaustionKeys(chain: ChainEntry[], accountKeys: (string | null)[]): string[] {
   const keys = new Set<string>();
   chain.forEach((entry, index) => {
     const accountKey = accountKeys[index] ?? null;
     if (accountKey === null) return;
-    keys.add(accountKey);
-    const model = chainEntryModel(entry);
-    if (model) keys.add(modelScopedKey(accountKey, model));
+    // Listed for every tier: the same account or model may be a fallback further down this chain.
+    for (const key of connectionKeys(entry, accountKey, false)) keys.add(key);
   });
   return [...keys];
 }
 
-/** Until when a connection is blocked: the later of its account and its account+model rows; undefined when neither. */
+/**
+ * Until when a connection is blocked: the latest of the rows it honours; undefined when none. The default
+ * (`isDefault`) honours only its account's quota exhaustion, never an unusable mark.
+ */
 export function connectionExhaustedUntil(
   entry: Pick<ChainEntry, "adapterConfig">,
   accountKey: string | null,
   exhaustedUntil: Map<string, Date>,
+  isDefault = false,
 ): Date | undefined {
   if (accountKey === null) return undefined;
-  const model = chainEntryModel(entry);
-  const account = exhaustedUntil.get(accountKey);
-  const scoped = model ? exhaustedUntil.get(modelScopedKey(accountKey, model)) : undefined;
-  if (!account || !scoped) return account ?? scoped;
-  return account.getTime() >= scoped.getTime() ? account : scoped;
+  let latest: Date | undefined;
+  for (const key of connectionKeys(entry, accountKey, isDefault)) {
+    const until = exhaustedUntil.get(key);
+    if (until && (!latest || until.getTime() > latest.getTime())) latest = until;
+  }
+  return latest;
 }
 
 export function selectConnection(input: {
@@ -145,14 +165,16 @@ export function selectConnection(input: {
 }): { index: number; kind: ModelFallbackSelectionKind } {
   const { chain, accountKeys, exhaustedUntil, activeConnectionId, pinnedFinished, now } = input;
 
-  const untilOf = (index: number) => connectionExhaustedUntil(chain[index]!, accountKeys[index] ?? null, exhaustedUntil);
+  const untilOf = (index: number) =>
+    connectionExhaustedUntil(chain[index]!, accountKeys[index] ?? null, exhaustedUntil, index === 0);
   const isExhausted = (index: number) => {
     const until = untilOf(index);
     return until !== undefined && until.getTime() > now.getTime();
   };
   // Ruling P10: only exhaustion makes the default unusable. An unresolvable default key (a responsible_user binding
   // without a user, a reconnect needed) dispatches the default as configured instead of switching; an unresolvable
-  // fallback key is still skipped when choosing a fallback.
+  // fallback key is still skipped when choosing a fallback. Unusable marks (#unusable, #model:) never apply to the
+  // default: untilOf(0) reads only the account's quota exhaustion.
   const usable = (index: number) =>
     (index === 0 || (accountKeys[index] ?? null) !== null) && !isExhausted(index);
 

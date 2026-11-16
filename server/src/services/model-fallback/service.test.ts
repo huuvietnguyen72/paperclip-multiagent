@@ -593,7 +593,9 @@ describePostgres("model fallback service", () => {
       const run = await s.newRun();
       const failed = await failDispatched(s, run.id, onOther.record, { errorCode: "claude_auth_required", error: "Please run /login" });
       expect(await service().recordUnusableFailure({ run: failed, agent: await s.loadAgent() })).toEqual({ retryNow: true });
-      expect((await s.exhaustions()).find((row) => row.accountKey === `ai:${otherConnection}`))
+      // Its own key, never the account's quota exhaustion key.
+      expect((await s.exhaustions()).map((row) => row.accountKey)).not.toContain(`ai:${otherConnection}`);
+      expect((await s.exhaustions()).find((row) => row.accountKey === `ai:${otherConnection}#unusable`))
         .toMatchObject({ parsedResetTime: false, sourceRunId: run.id });
 
       const next = await service().selectForDispatch({ agent: await s.loadAgent(), run: await s.newRun(), responsibleUserId: null });
@@ -626,6 +628,74 @@ describePostgres("model fallback service", () => {
       const crash = await failDispatched(s, run.id, fallbackRecord, { errorCode: "adapter_failed", error: "OpenCode exited with code 1" });
       expect(await service().recordUnusableFailure({ run: crash, agent: await s.loadAgent() })).toEqual({ retryNow: false });
       expect(await s.exhaustions()).toHaveLength(0);
+    });
+
+    /** Agent Y whose DEFAULT is the given connection (one of agent X's fallbacks), with a fallback of its own. */
+    async function insertCrossDefaultAgent(s: Awaited<ReturnType<typeof seed>>, defaults: {
+      adapterType: string; adapterConfig: Record<string, unknown>; aiConnection?: Record<string, unknown>;
+    }, fallback: Record<string, unknown>) {
+      const id = randomUUID();
+      await db.insert(agents).values({ id, companyId: s.companyId, name: `Y-${id.slice(0, 6)}`, role: "engineer", status: "idle",
+        adapterType: defaults.adapterType, adapterConfig: defaults.adapterConfig,
+        runtimeConfig: { heartbeat: { enabled: false }, ...(defaults.aiConnection ? { aiConnection: defaults.aiConnection } : {}),
+          modelFallback: { enabled: true, connections: [fallback] } } });
+      return id;
+    }
+
+    it("an unusable fallback ACCOUNT never takes another agent's default on that account (ruling P10)", async () => {
+      const s = await seed();
+      const otherClaudeId = randomUUID(), glmId = randomUUID(), otherConnection = randomUUID();
+      await configureChain(s, [
+        { id: otherClaudeId, adapterType: "claude_local", adapterConfig: { model: DEFAULT_MODEL }, aiConnection: claudeBinding(otherConnection) },
+        { id: glmId, adapterType: "opencode_local", adapterConfig: { model: FALLBACK_MODEL } },
+      ]);
+      const agentY = await insertCrossDefaultAgent(s,
+        { adapterType: "claude_local", adapterConfig: { model: DEFAULT_MODEL }, aiConnection: claudeBinding(otherConnection) },
+        { id: randomUUID(), adapterType: "opencode_local", adapterConfig: { model: FALLBACK_MODEL } });
+
+      await service().recordQuotaFailure({ run: await s.failQuota(s.defaultRecord), agent: await s.loadAgent() });
+      const onOther = await service().selectForDispatch({ agent: await s.loadAgent(), run: await s.newRun(), responsibleUserId: null });
+      const run = await s.newRun();
+      const failed = await failDispatched(s, run.id, onOther.record, { errorCode: "claude_auth_required", error: "Please run /login" });
+      await service().recordUnusableFailure({ run: failed, agent: await s.loadAgent() });
+
+      // Y keeps running its own default (a broken default must surface to the owner, not be hidden by a switch).
+      const onY = await service().selectForDispatch({ agent: await s.loadAgent(agentY), run: await s.newRun(agentY, null),
+        responsibleUserId: null });
+      expect(onY).toMatchObject({ kind: "default", adapterType: "claude_local",
+        record: { connectionId: "default", accountKey: `ai:${otherConnection}`, isFallback: false } });
+      expect(await s.state(agentY)).toBeNull();
+      // X itself moves on.
+      const onX = await service().selectForDispatch({ agent: await s.loadAgent(), run: await s.newRun(), responsibleUserId: null });
+      expect(onX.record?.connectionId).toBe(glmId);
+    });
+
+    it("an unusable fallback MODEL never takes another agent's default on that model (ruling P10)", async () => {
+      const s = await seed();
+      const glmId = randomUUID(), otherClaudeId = randomUUID(), otherConnection = randomUUID();
+      await configureChain(s, [
+        { id: glmId, adapterType: "opencode_local", adapterConfig: { model: FALLBACK_MODEL } },
+        { id: otherClaudeId, adapterType: "claude_local", adapterConfig: { model: DEFAULT_MODEL }, aiConnection: claudeBinding(otherConnection) },
+      ]);
+      // Like the owner's CEO: the default is the OpenCode model that other agents use as a fallback.
+      const agentY = await insertCrossDefaultAgent(s, { adapterType: "opencode_local", adapterConfig: { model: FALLBACK_MODEL } },
+        { id: randomUUID(), adapterType: "claude_local", adapterConfig: { model: DEFAULT_MODEL }, aiConnection: claudeBinding(otherConnection) });
+
+      await service().recordQuotaFailure({ run: await s.failQuota(s.defaultRecord), agent: await s.loadAgent() });
+      const onGlm = await service().selectForDispatch({ agent: await s.loadAgent(), run: await s.newRun(), responsibleUserId: null });
+      const run = await s.newRun();
+      const failed = await failDispatched(s, run.id, onGlm.record, { errorCode: "adapter_failed", error: MODEL_DISABLED });
+      await service().recordUnusableFailure({ run: failed, agent: await s.loadAgent() });
+      expect((await s.exhaustions()).map((row) => row.accountKey)).toContain(glmKey);
+
+      const onY = await service().selectForDispatch({ agent: await s.loadAgent(agentY), run: await s.newRun(agentY, null),
+        responsibleUserId: null });
+      expect(onY).toMatchObject({ kind: "default", adapterType: "opencode_local",
+        record: { connectionId: "default", accountKey: "login:opencode_local", model: FALLBACK_MODEL, isFallback: false } });
+      const viewY = await service().readAgentView({ companyId: s.companyId, agentId: agentY, now: clock });
+      expect(viewY.connections[0]).toMatchObject({ isDefault: true, exhaustedUntil: null });
+      const onX = await service().selectForDispatch({ agent: await s.loadAgent(), run: await s.newRun(), responsibleUserId: null });
+      expect(onX.record?.connectionId).toBe(otherClaudeId);
     });
   });
 });

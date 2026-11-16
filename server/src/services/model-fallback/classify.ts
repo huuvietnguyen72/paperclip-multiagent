@@ -1,9 +1,10 @@
 import { readProviderFailure } from "@paperclipai/shared";
+import { readHeartbeatRunErrorFamily } from "../heartbeat/retries.js";
 import { readDispatchRecord } from "./policy.js";
 
 /**
  * Why a fallback connection cannot run. A model that the provider refuses blocks only that model on its account;
- * an account that cannot authenticate (or was revoked) blocks every model on it, like an exhausted account.
+ * an account that cannot authenticate (or was revoked) blocks every model on it.
  */
 export type FallbackFailureKind = "model_unusable" | "account_unusable";
 
@@ -23,40 +24,35 @@ const ACCOUNT_ERROR_FAMILIES = new Set(["refresh_token_reused", "refresh_token_e
 const OWN_PATH_FAMILIES = new Set(["provider_quota", "transient_upstream"]);
 /** Provider failure categories that say the connection itself is fine. */
 const USABLE_CATEGORIES = new Set(["rate_limit", "quota_exhausted", "overloaded", "timeout", "invalid_request"]);
-
-// Conservative text patterns, matched against the run's own error line only (never against the agent's output).
-const MODEL_UNUSABLE_PATTERNS = [
-  /\bmodel access is disabled\b/i,
-  /\bProviderModelNotFoundError\b/,
-  /\bmodel_not_found\b/,
-  // "Model not found: x", "The model `x` is not available", "model x does not exist", "model is not enabled".
-  /\bmodel\s+(?:[`'"]?[\w./:@-]+[`'"]?\s+)?(?:is\s+)?(?:not\s+(?:found|available|enabled|allowed|supported)|does\s+not\s+exist|disabled)\b/i,
-];
-const ACCOUNT_UNUSABLE_PATTERNS = [
-  /\bReconnect or validate the selected AI account\b/i,
-  /\bauthentication_error\b/,
-  /\binvalid (?:x-)?api[ _-]?key\b/i,
-];
+/**
+ * select()'s deliberate account-level rejections (ai-connections.ts): the bound connection or grant is gone, disabled,
+ * unhealthy or needs a new sign-in. Every other configuration failure (env routing, project auth, an incompatible
+ * binding, a membership 403, DB or credential I/O) is wrapped under the same reason and proves nothing about the account.
+ */
+const ACCOUNT_SELECTION_FAILURES = new Set(["ai_connection_unavailable", "ai_connection_missing"]);
+/**
+ * OpenCode's own error signatures for a model the provider refuses. Only OpenCode's error line is provider output;
+ * Claude's is the CLI's final result text (agent prose), so Claude relies on its error codes alone.
+ */
+const OPENCODE_MODEL_UNUSABLE_SIGNATURES = [/\bModel access is disabled\b/, /\bProviderModelNotFoundError\b/];
 
 function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
 }
 
-function readString(value: unknown): string | null {
-  return typeof value === "string" && value.trim().length > 0 ? value : null;
-}
-
 /**
  * Classifies a failed run that was dispatched on a FALLBACK connection as "the connection itself cannot run".
- * Structured evidence (error family, provider failure category, error code) wins over text; anything unknown is null
- * and keeps today's behaviour. A run on the default connection is never classified (spec §3.2 rule 5, ruling P10):
- * a configuration problem on the default must reach the owner instead of being hidden by an automatic switch.
+ * Structured evidence (error family, provider failure category, error code, select() rejection) decides; the only text
+ * accepted is OpenCode's exact provider signature. Anything unknown is null and keeps today's behaviour. A run on the
+ * default connection is never classified (spec §3.2 rule 5, ruling P10): a configuration problem on the default must
+ * reach the owner instead of being hidden by an automatic switch.
  */
 export function classifyFallbackFailure(run: FailedRun): { kind: FallbackFailureKind } | null {
-  if (readDispatchRecord(run)?.isFallback !== true) return null;
+  const record = readDispatchRecord(run);
+  if (record?.isFallback !== true) return null;
   const resultJson = asRecord(run.resultJson);
-  const family = readString(resultJson.errorFamily);
-  if (run.errorCode === "provider_quota" || (family && OWN_PATH_FAMILIES.has(family))) return null;
+  const family = readHeartbeatRunErrorFamily({ errorCode: run.errorCode, resultJson: run.resultJson as Record<string, unknown> | null });
+  if (family && OWN_PATH_FAMILIES.has(family)) return null;
   if (family && ACCOUNT_ERROR_FAMILIES.has(family)) return { kind: "account_unusable" };
 
   const providerFailure = readProviderFailure(resultJson.providerFailure);
@@ -69,11 +65,17 @@ export function classifyFallbackFailure(run: FailedRun): { kind: FallbackFailure
 
   if (run.errorCode === "model_not_found") return { kind: "model_unusable" };
   if (run.errorCode && ACCOUNT_AUTH_ERROR_CODES.has(run.errorCode)) return { kind: "account_unusable" };
-  if (asRecord(resultJson.configurationIncomplete).reason === "ai_connection_unavailable") return { kind: "account_unusable" };
+  const configurationIncomplete = asRecord(resultJson.configurationIncomplete);
+  if (configurationIncomplete.reason === "ai_connection_unavailable"
+    && typeof configurationIncomplete.selectionFailure === "string"
+    && ACCOUNT_SELECTION_FAILURES.has(configurationIncomplete.selectionFailure)) {
+    return { kind: "account_unusable" };
+  }
 
-  const error = readString(run.error);
-  if (!error) return null;
-  if (MODEL_UNUSABLE_PATTERNS.some((pattern) => pattern.test(error))) return { kind: "model_unusable" };
-  if (ACCOUNT_UNUSABLE_PATTERNS.some((pattern) => pattern.test(error))) return { kind: "account_unusable" };
+  // Runs from before the adapter reported the structured failure, and any OpenCode path that does not.
+  if (record.adapterType === "opencode_local" && typeof run.error === "string"
+    && OPENCODE_MODEL_UNUSABLE_SIGNATURES.some((signature) => signature.test(run.error!))) {
+    return { kind: "model_unusable" };
+  }
   return null;
 }

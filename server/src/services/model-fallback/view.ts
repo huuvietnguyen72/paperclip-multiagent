@@ -217,7 +217,7 @@ export async function readAgentModelFallbackView(
 
   const connections = chain.map((entry, index): AgentModelFallbackView["connections"][number] => {
     const accountKey = accountKeys[index] ?? null;
-    const until = connectionExhaustedUntil(entry, accountKey, exhaustedUntil);
+    const until = connectionExhaustedUntil(entry, accountKey, exhaustedUntil, index === 0);
     const ownRuns = runs.filter((run) => connectionOfRun(run) === entry.id);
     const lastStarted = ownRuns.reduce<Date | null>((latest, run) =>
       run.startedAt && (!latest || run.startedAt > latest) ? run.startedAt : latest, null);

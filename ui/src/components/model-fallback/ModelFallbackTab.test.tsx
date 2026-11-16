@@ -224,10 +224,13 @@ describe("ModelFallbackTab", () => {
     const text = container.querySelector("section[aria-label=\"" + strings.timeline.title + "\"]")!.textContent ?? "";
     expect(text).toContain("task done and default reset");
     expect(text).toContain("fallback unavailable");
-    expect(text).toContain("account unavailable");
+    const occurrences = (needle: string) => text.split(needle).length - 1;
+    // account_unavailable and account_unusable both read "account unavailable".
+    expect(occurrences("account unavailable")).toBe(2);
     expect(text).toContain("model unavailable");
     expect(text).toContain("automatic switching turned off");
-    expect(text).toContain(strings.timeline.reasonUnknown);
+    // Only weird_new_code is unmapped: any other code falling through to "other reason" fails here.
+    expect(occurrences(strings.timeline.reasonUnknown)).toBe(1);
     for (const code of codes) expect(text).not.toContain(code);
     await act(async () => root.unmount());
   });
