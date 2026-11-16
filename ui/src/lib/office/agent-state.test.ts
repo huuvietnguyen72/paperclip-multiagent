@@ -92,6 +92,16 @@ describe("deriveOfficeAgents", () => {
     expect(manual.spot).toBe("desk");
   });
 
+  it("keeps idle executives (CEO, PM) at their desks while other idle agents go to the pantry", () => {
+    const views = deriveOfficeAgents(inputs({
+      agents: [agent({ id: "ceo", role: "ceo" }), agent({ id: "pm", role: "pm" }), agent({ id: "be", role: "engineer" })],
+    }));
+    const byId = new Map(views.map((view) => [view.id, view]));
+    expect(byId.get("ceo")).toMatchObject({ group: "idle", spot: "desk", pose: "idle" });
+    expect(byId.get("pm")).toMatchObject({ group: "idle", spot: "desk", pose: "idle" });
+    expect(byId.get("be")).toMatchObject({ group: "idle", spot: "pantry", pose: "idle" });
+  });
+
   it("treats a block covered by another agent as waiting, not attention", () => {
     const view = only({
       agents: [agent({ id: "tl", role: "cto" })],
@@ -199,8 +209,11 @@ describe("deriveOfficeAgents", () => {
     const recent = only({ agents: [agent({ id: "pm", role: "pm" })], recentCommentAt: new Map([["pm", NOW - 10_000]]) });
     expect(recent.spot).toBe("meeting");
     expect(recent.pose).toBe("standing");
+    // After the meeting an executive goes back to their own room, any other idle agent to the pantry.
     const stale = only({ agents: [agent({ id: "pm", role: "pm" })], recentCommentAt: new Map([["pm", NOW - 30_000]]) });
-    expect(stale.spot).toBe("pantry");
+    expect(stale.spot).toBe("desk");
+    const staleEngineer = only({ agents: [agent({ id: "be", role: "engineer" })], recentCommentAt: new Map([["be", NOW - 30_000]]) });
+    expect(staleEngineer.spot).toBe("pantry");
   });
 
   it("flashes a newly assigned agent and sends it to its desk", () => {

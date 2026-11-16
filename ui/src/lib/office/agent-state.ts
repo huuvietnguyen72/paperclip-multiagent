@@ -139,7 +139,8 @@ export function deriveOfficeAgents(input: OfficeInputs): OfficeAgentView[] {
         spot = "desk";
         pose = "standing";
       } else {
-        spot = manualPause ? "desk" : "pantry";
+        // Executives (CEO, PM) wait in their own room; everyone else takes a break in the pantry.
+        spot = manualPause || departmentForRole(agent.role) === "executive" ? "desk" : "pantry";
         pose = "idle";
       }
       if (assignedFlashUntil != null) spot = "desk";
