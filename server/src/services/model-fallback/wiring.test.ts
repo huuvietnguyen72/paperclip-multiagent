@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import {
   agents, agentTaskSessions, agentWakeupRequests, companies, createDb, EMBEDDED_POSTGRES_TEST_TIMEOUT_MS, heartbeatRuns, issues,
-  type Db,
+  modelAccountExhaustions, type Db,
 } from "@paperclipai/db";
 import type { ModelFallbackDispatchRecord } from "@paperclipai/shared";
 import { eq, sql } from "drizzle-orm";
@@ -11,10 +11,11 @@ import { getEmbeddedPostgresTestSupport, startEmbeddedPostgresTestDatabase } fro
 import { resolveExternalTestDatabaseUrl } from "../../__tests__/helpers/external-test-database.js";
 import { createHeartbeatQueueTestDependencies } from "../../__tests__/helpers/heartbeat-queue.js";
 import * as usageReceipts from "../usage-receipts.js";
+import { createAgentIdentityRedactor } from "../agent-identity-redaction.js";
 import { createHeartbeatQueue } from "../heartbeat/queue.js";
 import { createHeartbeatLifecycle, type HeartbeatLifecycleDependencies } from "../heartbeat/run-lifecycle.js";
 import { createHeartbeatRunCompletion, type CompleteHeartbeatRunInput, type HeartbeatRunCompletionDependencies } from "../heartbeat/run-completion.js";
-import { createHeartbeatRunPreparation } from "../heartbeat/run-preparation.js";
+import { ConfigurationIncompleteFailure, createHeartbeatRunPreparation } from "../heartbeat/run-preparation.js";
 import { createHeartbeatRunState, getAdapterSessionCodec } from "../heartbeat/run-state.js";
 import { buildEffectiveRunSessionConfigMetadata } from "../heartbeat/workspaces.js";
 import * as dispatchWiring from "./dispatch-wiring.js";
@@ -25,6 +26,7 @@ import {
   dropForeignAccountResumeSession,
   MODEL_FALLBACK_SELECTION_FAILED_MESSAGE,
   modelFallbackSwitchRetry,
+  modelFallbackUnusableTierRetry,
 } from "./dispatch-wiring.js";
 import { applyModelFallbackDispatch, buildChain } from "./policy.js";
 import { createModelFallbackService } from "./service.js";
@@ -241,6 +243,52 @@ describe("modelFallbackSwitchRetry", () => {
   });
 });
 
+const MODEL_DISABLED = "Model access is disabled. Change model access at https://opencode.ai/console/wrk_01J/models.";
+
+describe("modelFallbackUnusableTierRetry", () => {
+  const stored = { ...configuredAgent, companyId: "company-1" } as unknown as typeof agents.$inferSelect;
+  const failedRun = (record: ModelFallbackDispatchRecord | null, patch: Partial<typeof heartbeatRuns.$inferSelect> = {}) => ({
+    id: "run-1", companyId: "company-1", agentId: "agent-1", status: "failed", errorCode: "adapter_failed", error: MODEL_DISABLED,
+    resultJson: null, ...claimedRun(record), ...patch,
+  }) as typeof heartbeatRuns.$inferSelect;
+
+  it("records an unusable fallback tier and retries immediately", async () => {
+    const service = { recordUnusableFailure: vi.fn(async () => ({ retryNow: true })) };
+    const getAgent = vi.fn(async () => stored);
+    const run = failedRun(fallbackRecord());
+    expect(await modelFallbackUnusableTierRetry(service, run, getAgent)).toEqual({
+      retryReason: "model_fallback_switch", wakeReason: "model_fallback_switch", delayMs: 0, maxAttempts: 2,
+    });
+    expect(service.recordUnusableFailure).toHaveBeenCalledWith({ run, agent: stored });
+  });
+
+  it("never touches the service for a default-tier run or an unclassified failure", async () => {
+    const service = { recordUnusableFailure: vi.fn(async () => ({ retryNow: true })) };
+    const getAgent = vi.fn(async () => stored);
+    const onDefault = fallbackRecord({ connectionId: "default", adapterType: "claude_local", isFallback: false });
+    expect(await modelFallbackUnusableTierRetry(service, failedRun(onDefault), getAgent)).toBeNull();
+    expect(await modelFallbackUnusableTierRetry(service, failedRun(null), getAgent)).toBeNull();
+    expect(await modelFallbackUnusableTierRetry(service, failedRun(fallbackRecord(), { error: "OpenCode exited with code 1" }), getAgent))
+      .toBeNull();
+    expect(await modelFallbackUnusableTierRetry(undefined, failedRun(fallbackRecord()), getAgent)).toBeNull();
+    expect(service.recordUnusableFailure).not.toHaveBeenCalled();
+    expect(getAgent).not.toHaveBeenCalled();
+  });
+
+  it("keeps the existing branches when no switch is possible, bookkeeping fails or the budget is spent", async () => {
+    const getAgent = vi.fn(async () => stored);
+    const run = failedRun(fallbackRecord());
+    expect(await modelFallbackUnusableTierRetry({ recordUnusableFailure: vi.fn(async () => ({ retryNow: false })) }, run, getAgent)).toBeNull();
+    expect(await modelFallbackUnusableTierRetry({ recordUnusableFailure: vi.fn(async () => { throw new Error("db down"); }) }, run, getAgent))
+      .toBeNull();
+    const spent = failedRun(fallbackRecord(), { scheduledRetryReason: "model_fallback_switch", scheduledRetryAttempt: 2,
+      contextSnapshot: { executionRetryAccounting: { version: 1, failureRetries: 2, maxTurnContinuations: 0 } } });
+    const service = { recordUnusableFailure: vi.fn(async () => ({ retryNow: true })) };
+    expect(await modelFallbackUnusableTierRetry(service, spent, getAgent)).toBeNull();
+    expect(service.recordUnusableFailure).toHaveBeenCalledOnce();
+  });
+});
+
 describe("heartbeat start order (ruling P4)", () => {
   it("applies the dispatch record before the coordinator first reads the agent adapter", async () => {
     const source = await readFile(new URL("../heartbeat.ts", import.meta.url), "utf8");
@@ -439,7 +487,7 @@ describe.skipIf(!support.supported)("model fallback heartbeat wiring", () => {
   });
 
   it("quota failure with usable fallback retries immediately", async () => {
-    const modelFallback = { recordQuotaFailure: vi.fn(async () => ({ retryNow: true })) };
+    const modelFallback = { recordQuotaFailure: vi.fn(async () => ({ retryNow: true })), recordUnusableFailure: vi.fn() };
     const f = await quotaFailure(fallbackRuntimeConfig(), modelFallback);
     expect(modelFallback.recordQuotaFailure).toHaveBeenCalledWith({
       run: expect.objectContaining({ id: f.run.id, errorCode: "provider_quota" }), agent: expect.objectContaining({ id: f.agent.id }),
@@ -452,10 +500,89 @@ describe.skipIf(!support.supported)("model fallback heartbeat wiring", () => {
   });
 
   it("quota failure falls back to the transient retry when fallback bookkeeping throws", async () => {
-    const modelFallback = { recordQuotaFailure: vi.fn(async () => { throw new Error("database unavailable"); }) };
+    const modelFallback = { recordQuotaFailure: vi.fn(async () => { throw new Error("database unavailable"); }), recordUnusableFailure: vi.fn() };
     const f = await quotaFailure(fallbackRuntimeConfig(), modelFallback);
     expect(modelFallback.recordQuotaFailure).toHaveBeenCalledOnce();
+    expect(modelFallback.recordUnusableFailure).not.toHaveBeenCalled();
     expect(f.deps.scheduleBoundedRetryForRun).toHaveBeenCalledOnce();
     expect(f.deps.scheduleBoundedRetryForRun.mock.calls[0]).toHaveLength(2);
+  });
+
+  const switchRetryOptions = (agent: typeof agents.$inferSelect) => ({
+    retryReason: "model_fallback_switch", wakeReason: "model_fallback_switch", delayMs: 0, maxAttempts: buildChain(agent).length,
+  });
+  const defaultTierRecord = () => fallbackRecord({ connectionId: "default", accountKey: "login:process", adapterType: "process",
+    model: null, isFallback: false });
+  const exhaustionKeysOf = (companyId: string) => db.select({ accountKey: modelAccountExhaustions.accountKey })
+    .from(modelAccountExhaustions).where(eq(modelAccountExhaustions.companyId, companyId)).then((rows) => rows.map((row) => row.accountKey));
+
+  /** A claimed run on the given tier whose adapter reports OpenCode's "Model access is disabled" failure. */
+  async function modelDisabledFailure(record: ModelFallbackDispatchRecord) {
+    const { agent } = await seedAgent(fallbackRuntimeConfig());
+    const [wake] = await db.insert(agentWakeupRequests).values({ companyId: agent.companyId, agentId: agent.id, source: "on_demand", status: "claimed" }).returning();
+    const [run] = await db.insert(heartbeatRuns).values({ companyId: agent.companyId, agentId: agent.id, wakeupRequestId: wake.id,
+      status: "running", runtimeMode: "legacy", startedAt: new Date(), ...claimedRun(record) }).returning();
+    const deps = { ...completionCallbacks(), modelFallback: createModelFallbackService(db) };
+    const input: CompleteHeartbeatRunInput = {
+      run, agent, issueId: null, issueRef: null, signal: new AbortController().signal,
+      output: { handle: { store: "local_file", logRef: "test-log" }, outputProgressState: { pending: { bytes: 0 } }, flushOutputProgress: vi.fn(async () => {}), stdoutExcerpt: "", stderrExcerpt: "" },
+      session: { runtimeForAdapter: { sessionId: null, sessionDisplayId: null }, previousSessionParams: null, taskKey: "unusable-task", configuredModel: FALLBACK_MODEL,
+        sessionConfigMetadata: await buildEffectiveRunSessionConfigMetadata({ adapterType: agent.adapterType, effectiveAdapterConfig: {}, agentRuntimeConfig: {}, issueOverrides: null, workspaceConfig: null, environment: null, environmentEnv: null, projectEnv: null, routineEnv: null, runtimeSkills: [] }),
+      },
+      readFailureReportSecrets: () => [],
+      adapterResult: { exitCode: 1, signal: null, timedOut: false, errorMessage: MODEL_DISABLED, errorCode: null, provider: "opencode-go", model: FALLBACK_MODEL },
+      sessionCodec: getAdapterSessionCodec(agent.adapterType), taskSessionForRun: null, sessionCompaction: { rotate: false, reason: null }, configFreshnessResultMetadata: { version: 1 }, runLedgerScope: {}, currentUserRedactionOptions: { enabled: false }, providerTraceCapture: true, onProviderTraceFinalized: vi.fn(), issueContext: null, onLog: vi.fn(async () => {}),
+    };
+    await createHeartbeatRunCompletion(db, deps).completeRun(input);
+    const [failed] = await db.select().from(heartbeatRuns).where(eq(heartbeatRuns.id, run.id));
+    expect(failed).toMatchObject({ status: "failed", errorCode: "adapter_failed", error: MODEL_DISABLED });
+    return { agent, run, deps };
+  }
+
+  it("a fallback-tier model-disabled failure marks the model and retries immediately on the next tier", async () => {
+    const f = await modelDisabledFailure(fallbackRecord());
+    expect(await exhaustionKeysOf(f.agent.companyId)).toEqual([`login:opencode_local#model:${FALLBACK_MODEL}`]);
+    expect(f.deps.scheduleBoundedRetryForRun).toHaveBeenCalledOnce();
+    expect(f.deps.scheduleBoundedRetryForRun).toHaveBeenCalledWith(expect.objectContaining({ id: f.run.id }), f.agent, switchRetryOptions(f.agent));
+  });
+
+  it("the same failure on the default tier keeps the legacy path", async () => {
+    const f = await modelDisabledFailure(defaultTierRecord());
+    expect(await exhaustionKeysOf(f.agent.companyId)).toEqual([]);
+    expect(f.deps.scheduleBoundedRetryForRun).not.toHaveBeenCalled();
+  });
+
+  /** A claimed run on the given tier whose setup fails because its AI account must be reconnected. */
+  async function accountUnavailableSetupFailure(record: ModelFallbackDispatchRecord) {
+    const { agent } = await seedAgent(fallbackRuntimeConfig());
+    const [wake] = await db.insert(agentWakeupRequests).values({ companyId: agent.companyId, agentId: agent.id, source: "on_demand", status: "claimed" }).returning();
+    const [run] = await db.insert(heartbeatRuns).values({ companyId: agent.companyId, agentId: agent.id, wakeupRequestId: wake.id,
+      status: "running", runtimeMode: "legacy", startedAt: new Date(), ...claimedRun(record) }).returning();
+    const deps = { ...completionCallbacks(), modelFallback: createModelFallbackService(db) };
+    // The setup path chains .catch on the scheduled retry, like the real (async) scheduler.
+    deps.scheduleBoundedRetryForRun.mockResolvedValue(null as never);
+    const outerErr = new ConfigurationIncompleteFailure("Reconnect or validate the selected AI account",
+      { configurationIncomplete: { reason: "ai_connection_unavailable" } });
+    await createHeartbeatRunCompletion(db, deps).failRunSetup({ run, runId: run.id, outerErr, signal: new AbortController().signal,
+      providerDispatchStarted: false, identityRedactor: createAgentIdentityRedactor(), readFailureReportSecrets: () => [] });
+    const [failed] = await db.select().from(heartbeatRuns).where(eq(heartbeatRuns.id, run.id));
+    expect(failed).toMatchObject({ status: "failed", errorCode: "configuration_incomplete" });
+    return { agent, run, deps };
+  }
+
+  it("a fallback-tier account that must be reconnected is marked and the run retries immediately", async () => {
+    const f = await accountUnavailableSetupFailure(fallbackRecord());
+    expect(await exhaustionKeysOf(f.agent.companyId)).toEqual(["login:opencode_local"]);
+    expect(f.deps.scheduleBoundedRetryForRun).toHaveBeenCalledOnce();
+    expect(f.deps.scheduleBoundedRetryForRun).toHaveBeenCalledWith(expect.objectContaining({ id: f.run.id }),
+      expect.objectContaining({ id: f.agent.id }), switchRetryOptions(f.agent));
+    expect(f.deps.scheduleInteractionContinuationInfrastructureRetryIfEligible).not.toHaveBeenCalled();
+  });
+
+  it("the same setup failure on the default tier keeps the legacy path", async () => {
+    const f = await accountUnavailableSetupFailure(defaultTierRecord());
+    expect(await exhaustionKeysOf(f.agent.companyId)).toEqual([]);
+    expect(f.deps.scheduleBoundedRetryForRun).not.toHaveBeenCalled();
+    expect(f.deps.scheduleInteractionContinuationInfrastructureRetryIfEligible).toHaveBeenCalledOnce();
   });
 });

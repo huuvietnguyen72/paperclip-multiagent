@@ -2,6 +2,7 @@ import { MODEL_FALLBACK_RETRY_REASON, type ModelFallbackDispatchRecord } from "@
 import { logger } from "../../middleware/logger.js";
 import { routedRuntimeKeys } from "../ai-connection-router.js";
 import { executionRetryAttemptCount } from "../execution-recovery-attempt.js";
+import { classifyFallbackFailure } from "./classify.js";
 import { buildChain, readDispatchRecord } from "./policy.js";
 import type { AgentRow, createModelFallbackService, HeartbeatRunRow, ModelFallbackDispatchResult } from "./service.js";
 
@@ -11,7 +12,8 @@ import type { AgentRow, createModelFallbackService, HeartbeatRunRow, ModelFallba
  */
 type ModelFallbackService = ReturnType<typeof createModelFallbackService>;
 export type ModelFallbackDispatcher = Pick<ModelFallbackService, "selectForDispatch">;
-export type ModelFallbackQuotaRecorder = Pick<ModelFallbackService, "recordQuotaFailure">;
+/** The failed-run recorders run completion uses (provider quota, and an unusable fallback connection). */
+export type ModelFallbackQuotaRecorder = Pick<ModelFallbackService, "recordQuotaFailure" | "recordUnusableFailure">;
 
 /** The claim's runnerProfileJson.adapterDispatch value. */
 export type AdapterDispatchJson = { adapterType: string; modelFallback?: ModelFallbackDispatchRecord };
@@ -104,21 +106,45 @@ export function dropFallbackIssueModelOverrides<T extends { adapterConfig: Recor
  * is already spent keeps the existing branches instead of ending in an exhausted switch.
  */
 export async function modelFallbackSwitchRetry(
-  service: ModelFallbackQuotaRecorder | undefined,
+  service: Pick<ModelFallbackService, "recordQuotaFailure"> | undefined,
   run: HeartbeatRunRow,
   getAgent: (agentId: string) => Promise<AgentRow | null>,
 ): Promise<ModelFallbackSwitchRetryOptions | null> {
   if (!service) return null;
+  return switchRetry(run, getAgent, (agent) => service.recordQuotaFailure({ run, agent }), "quota");
+}
+
+/**
+ * Failed-run completion hook for a FALLBACK connection that cannot run (a model the provider refuses, an account that
+ * cannot authenticate). Same contract as the quota hook: the connection is marked for the no-reset cool-down and the
+ * task retries now on the next usable connection; null keeps the existing branches. A run on the default connection,
+ * or a failure the classifier does not recognise, returns null without touching the service.
+ */
+export async function modelFallbackUnusableTierRetry(
+  service: Pick<ModelFallbackService, "recordUnusableFailure"> | undefined,
+  run: HeartbeatRunRow,
+  getAgent: (agentId: string) => Promise<AgentRow | null>,
+): Promise<ModelFallbackSwitchRetryOptions | null> {
+  if (!service || !classifyFallbackFailure(run)) return null;
+  return switchRetry(run, getAgent, (agent) => service.recordUnusableFailure({ run, agent }), "unusable connection");
+}
+
+async function switchRetry(
+  run: HeartbeatRunRow,
+  getAgent: (agentId: string) => Promise<AgentRow | null>,
+  record: (agent: AgentRow) => Promise<{ retryNow: boolean }>,
+  cause: string,
+): Promise<ModelFallbackSwitchRetryOptions | null> {
   try {
     const agent = await getAgent(run.agentId);
     if (!agent) return null;
-    const { retryNow } = await service.recordQuotaFailure({ run, agent });
+    const { retryNow } = await record(agent);
     const maxAttempts = buildChain(agent).length;
     if (!retryNow || executionRetryAttemptCount(run, MODEL_FALLBACK_RETRY_REASON) >= maxAttempts) return null;
     return { retryReason: MODEL_FALLBACK_RETRY_REASON, wakeReason: MODEL_FALLBACK_RETRY_REASON, delayMs: 0, maxAttempts };
   } catch (error) {
     logger.error({ companyId: run.companyId, agentId: run.agentId, runId: run.id, err: error },
-      "model fallback quota bookkeeping failed; keeping the existing retry path");
+      `model fallback ${cause} bookkeeping failed; keeping the existing retry path`);
     return null;
   }
 }

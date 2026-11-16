@@ -213,7 +213,8 @@ describe("ModelFallbackTab", () => {
 
   it("maps timeline reason codes to English and never shows the raw code", async () => {
     const view = baseView();
-    const codes = ["account_exhausted", "pinned_finished", "fallback_unavailable", "account_unavailable", "disabled", "weird_new_code"];
+    const codes = ["account_exhausted", "pinned_finished", "fallback_unavailable", "account_unavailable", "model_unusable",
+      "account_unusable", "disabled", "weird_new_code"];
     view.timeline = codes.map((reason, index) => ({
       at: `2026-11-12T0${index + 1}:00:00.000Z`, kind: "returned" as const, toModel: "claude-opus-4-8", reason,
     }));
@@ -224,6 +225,7 @@ describe("ModelFallbackTab", () => {
     expect(text).toContain("task done and default reset");
     expect(text).toContain("fallback unavailable");
     expect(text).toContain("account unavailable");
+    expect(text).toContain("model unavailable");
     expect(text).toContain("automatic switching turned off");
     expect(text).toContain(strings.timeline.reasonUnknown);
     for (const code of codes) expect(text).not.toContain(code);

@@ -11,6 +11,7 @@ import { forbidden } from "../../errors.js";
 import { aiConnectionConfigurationFailure } from "../ai-connection-configuration-failure.js";
 import { aiConnectionService } from "../ai-connections.js";
 import { deleteCompany } from "../company-deletion.js";
+import { PROVIDER_QUOTA_RECOVERY_DEFAULT_BACKOFF_MS } from "../recovery/provider-quota-retry-at.js";
 import { buildChain } from "./policy.js";
 import { createModelFallbackService } from "./service.js";
 
@@ -468,5 +469,163 @@ describePostgres("model fallback service", () => {
     rows = await s.exhaustions();
     expect(rows[0]!.exhaustedUntil.toISOString()).toBe(new Date(clock.getTime() + 60 * 60_000).toISOString());
     expect(rows[0]!.parsedResetTime).toBe(false);
+  });
+
+  describe("an unusable fallback tier", () => {
+    const MODEL_DISABLED = "Model access is disabled. Change model access at https://opencode.ai/console/wrk_01J/models.";
+    const glmKey = `login:opencode_local#model:${FALLBACK_MODEL}`;
+    const claudeBinding = (connectionId: string) =>
+      ({ provider: "anthropic", method: "subscription", mode: "shared", connectionId, grantId: randomUUID() });
+
+    /** Replaces the agent's fallback chain; returns the configured connection ids in order. */
+    async function configureChain(s: Awaited<ReturnType<typeof seed>>, connections: Record<string, unknown>[],
+      extra: Record<string, unknown> = {}) {
+      const agent = await s.loadAgent();
+      const runtimeConfig = { ...(agent.runtimeConfig as Record<string, unknown>),
+        modelFallback: { enabled: true, connections, ...extra } };
+      await db.update(agents).set({ runtimeConfig }).where(eq(agents.id, s.agentId));
+    }
+
+    /** Fails a dispatched run with the given failure, as run completion persists it. */
+    async function failDispatched(s: Awaited<ReturnType<typeof seed>>, runId: string, record: unknown,
+      failure: { errorCode: string; error: string; resultJson?: Record<string, unknown> }) {
+      await db.update(heartbeatRuns).set({ status: "failed", startedAt: clock, finishedAt: clock, resultJson: {}, ...failure,
+        runnerProfileJson: { adapterDispatch: { modelFallback: record } } }).where(eq(heartbeatRuns.id, runId));
+      return s.loadRun(runId);
+    }
+
+    it("reproduces the incident: a disabled GLM tier is left for the next usable Claude account, task kept", async () => {
+      const s = await seed();
+      const revokedId = randomUUID(), glmId = randomUUID(), newClaudeId = randomUUID();
+      const revokedConnection = randomUUID(), newConnection = randomUUID();
+      await configureChain(s, [
+        { id: revokedId, adapterType: "claude_local", adapterConfig: { model: DEFAULT_MODEL }, aiConnection: claudeBinding(revokedConnection) },
+        { id: glmId, adapterType: "opencode_local", adapterConfig: { model: FALLBACK_MODEL } },
+        { id: newClaudeId, adapterType: "claude_local", adapterConfig: { model: DEFAULT_MODEL }, aiConnection: claudeBinding(newConnection) },
+      ], { noResetWaitMinutes: 30 });
+      // The revoked Anthropic connection cannot be selected, exactly like the live instance.
+      const live = createModelFallbackService(db, { now: () => clock,
+        resolveAccountConnectionId: async ({ entry }) => {
+          const connectionId = await resolveAccountConnectionId({ entry });
+          return connectionId === revokedConnection ? null : connectionId;
+        } });
+
+      // 00:21 the default hits its session limit; 00:24 the next claim skips the revoked tier and lands on GLM.
+      await live.recordQuotaFailure({ run: await s.failQuota(s.defaultRecord), agent: await s.loadAgent() });
+      const onGlm = await live.selectForDispatch({ agent: await s.loadAgent(), run: await s.newRun(), responsibleUserId: null });
+      expect(onGlm).toMatchObject({ adapterType: "opencode_local", kind: "switch",
+        record: { connectionId: glmId, accountKey: "login:opencode_local", model: FALLBACK_MODEL, isFallback: true } });
+      expect(await s.state()).toMatchObject({ activeConnectionId: glmId, pinnedIssueIds: [s.issueId] });
+
+      // The GLM run fails because the provider switched the model off.
+      const glmRun = await s.newRun();
+      const failedGlm = await failDispatched(s, glmRun.id, onGlm.record, { errorCode: "adapter_failed", error: MODEL_DISABLED });
+      expect(await live.recordUnusableFailure({ run: failedGlm, agent: await s.loadAgent() })).toEqual({ retryNow: true });
+      const marked = (await s.exhaustions()).find((row) => row.accountKey === glmKey);
+      expect(marked).toMatchObject({ parsedResetTime: false, sourceRunId: glmRun.id });
+      expect(marked!.exhaustedUntil.toISOString()).toBe(new Date(clock.getTime() + 30 * 60_000).toISOString());
+      // The OpenCode login itself is not marked: other OpenCode models stay usable.
+      expect((await s.exhaustions()).some((row) => row.accountKey === "login:opencode_local")).toBe(false);
+
+      // The immediate retry's claim moves on to the working Claude account; the task stays pinned.
+      const retry = await s.newRun();
+      await db.update(heartbeatRuns).set({ scheduledRetryReason: "model_fallback_switch", scheduledRetryAttempt: 1 })
+        .where(eq(heartbeatRuns.id, retry.id));
+      const moved = await live.selectForDispatch({ agent: await s.loadAgent(), run: await s.loadRun(retry.id), responsibleUserId: null });
+      expect(moved).toMatchObject({ adapterType: "claude_local", kind: "switch",
+        record: { connectionId: newClaudeId, accountKey: `ai:${newConnection}`, model: DEFAULT_MODEL, isFallback: true } });
+      expect(await s.state()).toMatchObject({ activeConnectionId: newClaudeId, pinnedIssueIds: [s.issueId], reason: "model_unusable" });
+      const switched = await s.actions("agent.model_fallback.switched");
+      expect(switched.map((row) => row.details)).toContainEqual(expect.objectContaining({
+        from: glmId, to: newClaudeId, reason: "model_unusable", resetAt: null, fromModel: FALLBACK_MODEL, toModel: DEFAULT_MODEL,
+      }));
+      expect((await s.systemComments()).map((comment) => comment.body)).toContain(
+        `OpenCode Go · ${FALLBACK_MODEL} không dùng được (model bị tắt) → chuyển sang Claude Code · ${DEFAULT_MODEL} để làm tiếp.`,
+      );
+
+      // The tab shows the GLM tier as out until its cool-down ends.
+      const view = await live.readAgentView({ companyId: s.companyId, agentId: s.agentId, now: clock });
+      expect(view.connections.find((connection) => connection.id === glmId)?.exhaustedUntil)
+        .toBe(marked!.exhaustedUntil.toISOString());
+      expect(view.active).toMatchObject({ connectionId: newClaudeId, reason: "model_unusable" });
+    });
+
+    it("keeps another model on the same OpenCode account usable and uses the default cool-down", async () => {
+      const s = await seed();
+      const glmId = randomUUID(), deepseekId = randomUUID();
+      await configureChain(s, [
+        { id: glmId, adapterType: "opencode_local", adapterConfig: { model: FALLBACK_MODEL } },
+        { id: deepseekId, adapterType: "opencode_local", adapterConfig: { model: "opencode-go/deepseek-v4" } },
+      ]);
+      await service().recordQuotaFailure({ run: await s.failQuota(s.defaultRecord), agent: await s.loadAgent() });
+      const onGlm = await service().selectForDispatch({ agent: await s.loadAgent(), run: await s.newRun(), responsibleUserId: null });
+      expect(onGlm.record?.connectionId).toBe(glmId);
+
+      const glmRun = await s.newRun();
+      const failed = await failDispatched(s, glmRun.id, onGlm.record, { errorCode: "adapter_failed", error: MODEL_DISABLED });
+      expect(await service().recordUnusableFailure({ run: failed, agent: await s.loadAgent() })).toEqual({ retryNow: true });
+      const marked = (await s.exhaustions()).find((row) => row.accountKey === glmKey);
+      expect(marked!.exhaustedUntil.toISOString())
+        .toBe(new Date(clock.getTime() + PROVIDER_QUOTA_RECOVERY_DEFAULT_BACKOFF_MS).toISOString());
+
+      const next = await service().selectForDispatch({ agent: await s.loadAgent(), run: await s.newRun(), responsibleUserId: null });
+      expect(next).toMatchObject({ kind: "switch",
+        record: { connectionId: deepseekId, accountKey: "login:opencode_local", model: "opencode-go/deepseek-v4" } });
+
+      // After the cool-down GLM is tried again (the owner may have re-enabled it): the agent stays on DeepSeek, but GLM
+      // is no longer marked out in the tab.
+      clock = new Date(clock.getTime() + PROVIDER_QUOTA_RECOVERY_DEFAULT_BACKOFF_MS + 60_000);
+      const view = await service().readAgentView({ companyId: s.companyId, agentId: s.agentId, now: clock });
+      expect(view.connections.find((connection) => connection.id === glmId)?.exhaustedUntil).toBeNull();
+    });
+
+    it("marks the whole account when a fallback account cannot authenticate", async () => {
+      const s = await seed();
+      const otherClaudeId = randomUUID(), glmId = randomUUID(), otherConnection = randomUUID();
+      await configureChain(s, [
+        { id: otherClaudeId, adapterType: "claude_local", adapterConfig: { model: DEFAULT_MODEL }, aiConnection: claudeBinding(otherConnection) },
+        { id: glmId, adapterType: "opencode_local", adapterConfig: { model: FALLBACK_MODEL } },
+      ]);
+      await service().recordQuotaFailure({ run: await s.failQuota(s.defaultRecord), agent: await s.loadAgent() });
+      const onOther = await service().selectForDispatch({ agent: await s.loadAgent(), run: await s.newRun(), responsibleUserId: null });
+      expect(onOther.record).toMatchObject({ connectionId: otherClaudeId, accountKey: `ai:${otherConnection}` });
+
+      const run = await s.newRun();
+      const failed = await failDispatched(s, run.id, onOther.record, { errorCode: "claude_auth_required", error: "Please run /login" });
+      expect(await service().recordUnusableFailure({ run: failed, agent: await s.loadAgent() })).toEqual({ retryNow: true });
+      expect((await s.exhaustions()).find((row) => row.accountKey === `ai:${otherConnection}`))
+        .toMatchObject({ parsedResetTime: false, sourceRunId: run.id });
+
+      const next = await service().selectForDispatch({ agent: await s.loadAgent(), run: await s.newRun(), responsibleUserId: null });
+      expect(next.record?.connectionId).toBe(glmId);
+      const switched = await s.actions("agent.model_fallback.switched");
+      expect(switched.map((row) => row.details)).toContainEqual(expect.objectContaining({
+        from: otherClaudeId, to: glmId, reason: "account_unusable", resetAt: null }));
+      expect((await s.systemComments()).map((comment) => comment.body)).toContain(
+        `Claude Code · ${DEFAULT_MODEL} không dùng được (tài khoản không truy cập được) → chuyển sang OpenCode Go · ${FALLBACK_MODEL} để làm tiếp.`,
+      );
+    });
+
+    it("does not retry now when no other tier is usable", async () => {
+      const s = await seed();
+      await service().recordQuotaFailure({ run: await s.failQuota(s.defaultRecord), agent: await s.loadAgent() });
+      const onGlm = await service().selectForDispatch({ agent: await s.loadAgent(), run: await s.newRun(), responsibleUserId: null });
+      const run = await s.newRun();
+      const failed = await failDispatched(s, run.id, onGlm.record, { errorCode: "adapter_failed", error: MODEL_DISABLED });
+      expect(await service().recordUnusableFailure({ run: failed, agent: await s.loadAgent() })).toEqual({ retryNow: false });
+      expect((await s.exhaustions()).map((row) => row.accountKey)).toContain(glmKey);
+    });
+
+    it("never marks anything for a run on the default connection or an unclassified failure", async () => {
+      const s = await seed();
+      const run = await s.newRun();
+      const onDefault = await failDispatched(s, run.id, s.defaultRecord, { errorCode: "adapter_failed", error: MODEL_DISABLED });
+      expect(await service().recordUnusableFailure({ run: onDefault, agent: await s.loadAgent() })).toEqual({ retryNow: false });
+      const fallbackRecord = { connectionId: s.fallbackId, accountKey: "login:opencode_local", adapterType: "opencode_local",
+        model: FALLBACK_MODEL, isFallback: true };
+      const crash = await failDispatched(s, run.id, fallbackRecord, { errorCode: "adapter_failed", error: "OpenCode exited with code 1" });
+      expect(await service().recordUnusableFailure({ run: crash, agent: await s.loadAgent() })).toEqual({ retryNow: false });
+      expect(await s.exhaustions()).toHaveLength(0);
+    });
   });
 });

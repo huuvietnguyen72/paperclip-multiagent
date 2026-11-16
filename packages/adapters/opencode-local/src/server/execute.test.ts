@@ -107,6 +107,45 @@ describe("OpenCode local skill injection", () => {
     expect(prompts[1]).toContain("Connection tools:");
   });
 
+  it("reports a model the provider switched off as a structured model_unavailable failure", async () => {
+    const commandPath = path.join(configHome, "fake-opencode-model-disabled");
+    await fs.writeFile(commandPath, "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+    const message = "Model access is disabled. Change model access at https://opencode.ai/console/wrk_01J/models.";
+    runProcessMock.mockReset().mockResolvedValue(probeResult({ exitCode: 1, stdout: JSON.stringify({
+      type: "error", sessionID: "glm-session", error: { name: "APIError", data: { message } },
+    }) }));
+    const result = await execute({
+      runId: "run-model-disabled",
+      agent: { id: "agent-1", companyId: "company-1", name: "OpenCode", adapterType: "opencode_local", adapterConfig: {} },
+      runtime: { sessionId: null, sessionParams: null, sessionDisplayId: null, taskKey: null },
+      config: { command: commandPath, cwd: configHome, model: "opencode-go/glm-5.3", env: { OPENCODE_ALLOW_ALL_MODELS: "1" } },
+      context: createPromptContextFixture(),
+      onLog: async () => {},
+    });
+    expect(result).toMatchObject({ exitCode: 1, errorMessage: message, resultJson: { providerFailure: {
+      schema: "paperclip.provider-failure.v1", provider: "opencode", phase: "turn", category: "model_unavailable", message,
+      retryability: "requires_action" } } });
+    // The run keeps its ordinary failure code: only a fallback-tier dispatch moves the model fallback chain.
+    expect(result.errorCode ?? null).toBeNull();
+    expect(result.errorFamily ?? null).toBeNull();
+  });
+
+  it("adds no provider failure to an ordinary OpenCode failure", async () => {
+    const commandPath = path.join(configHome, "fake-opencode-crash");
+    await fs.writeFile(commandPath, "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+    runProcessMock.mockReset().mockResolvedValue(probeResult({ exitCode: 1, stderr: "TypeError: boom" }));
+    const result = await execute({
+      runId: "run-crash",
+      agent: { id: "agent-1", companyId: "company-1", name: "OpenCode", adapterType: "opencode_local", adapterConfig: {} },
+      runtime: { sessionId: null, sessionParams: null, sessionDisplayId: null, taskKey: null },
+      config: { command: commandPath, cwd: configHome, model: "opencode-go/glm-5.3", env: { OPENCODE_ALLOW_ALL_MODELS: "1" } },
+      context: createPromptContextFixture(),
+      onLog: async () => {},
+    });
+    expect(result.exitCode).toBe(1);
+    expect(result.resultJson).not.toHaveProperty("providerFailure");
+  });
+
   it("injects runtime skills into the configured child HOME", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "paperclip-opencode-configured-home-"));
     const processHome = path.join(root, "process-home");

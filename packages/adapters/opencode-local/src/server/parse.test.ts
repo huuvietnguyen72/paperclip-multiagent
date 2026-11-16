@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseOpenCodeJsonl, isOpenCodeUnknownSessionError } from "./parse.js";
+import { parseOpenCodeJsonl, isOpenCodeUnknownSessionError, openCodeModelUnavailableFailure } from "./parse.js";
 
 describe("parseOpenCodeJsonl", () => {
   it("parses assistant text, usage, cost, and errors", () => {
@@ -73,6 +73,33 @@ describe("parseOpenCodeJsonl", () => {
     expect(isOpenCodeUnknownSessionError("Session not found: s_123", "")).toBe(true);
     expect(isOpenCodeUnknownSessionError("", "unknown session id")).toBe(true);
     expect(isOpenCodeUnknownSessionError("all good", "")).toBe(false);
+  });
+});
+
+describe("openCodeModelUnavailableFailure", () => {
+  it("reports a provider-disabled model as a structured model_unavailable failure", () => {
+    const message = "Model access is disabled. Change model access at https://opencode.ai/console/wrk_01J/models.";
+    expect(openCodeModelUnavailableFailure(message)).toEqual({
+      schema: "paperclip.provider-failure.v1",
+      provider: "opencode",
+      phase: "turn",
+      category: "model_unavailable",
+      message,
+      retryability: "requires_action",
+    });
+    expect(openCodeModelUnavailableFailure("ProviderModelNotFoundError: opencode-go/glm-9")?.category).toBe("model_unavailable");
+  });
+
+  it("leaves every other failure unclassified", () => {
+    expect(openCodeModelUnavailableFailure(null)).toBeNull();
+    expect(openCodeModelUnavailableFailure("")).toBeNull();
+    expect(openCodeModelUnavailableFailure("OpenCode exited with code 1")).toBeNull();
+    expect(openCodeModelUnavailableFailure("The model attempted a command that is not allowed")).toBeNull();
+  });
+
+  it("bounds the message to the provider-failure schema", () => {
+    const long = `Model access is disabled. ${"x".repeat(5000)}`;
+    expect(openCodeModelUnavailableFailure(long)?.message).toHaveLength(4000);
   });
 });
 

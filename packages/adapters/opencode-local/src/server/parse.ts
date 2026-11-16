@@ -106,6 +106,28 @@ export function createOpenCodeJsonlParser() {
   };
 }
 
+/** OpenCode's errors for a model the provider refuses (switched off for the account, or unknown to it). */
+const OPENCODE_MODEL_UNAVAILABLE_PATTERNS = [/\bmodel access is disabled\b/i, /\bProviderModelNotFoundError\b/];
+const PROVIDER_FAILURE_MESSAGE_MAX = 4000;
+
+/**
+ * A `paperclip.provider-failure.v1` record (see `@paperclipai/shared` `ProviderFailure`) for a model OpenCode refuses,
+ * e.g. "Model access is disabled. Change model access at https://opencode.ai/console/…/models." Other failures get none.
+ * The server reads it from the run's resultJson to move an agent off a fallback connection whose model cannot run.
+ */
+export function openCodeModelUnavailableFailure(errorMessage: string | null | undefined) {
+  const message = (errorMessage ?? "").trim();
+  if (!message || !OPENCODE_MODEL_UNAVAILABLE_PATTERNS.some((pattern) => pattern.test(message))) return null;
+  return {
+    schema: "paperclip.provider-failure.v1" as const,
+    provider: "opencode",
+    phase: "turn" as const,
+    category: "model_unavailable" as const,
+    message: [...message].slice(0, PROVIDER_FAILURE_MESSAGE_MAX).join(""),
+    retryability: "requires_action" as const,
+  };
+}
+
 export function isOpenCodeUnknownSessionError(stdout: string, stderr: string): boolean {
   const haystack = `${stdout}\n${stderr}`
     .split(/\r?\n/)

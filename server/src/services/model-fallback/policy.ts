@@ -98,6 +98,43 @@ export function applyModelFallbackDispatch<A extends AgentLike>(
   return { agent: record.isFallback ? effectiveRunAgent(agent, entry) : agent, missing: false };
 }
 
+/** The exhaustion key that blocks one model on an account (a model the provider refuses), not the whole account. */
+export function modelScopedKey(accountKey: string, model: string): string {
+  return `${accountKey}#model:${model}`;
+}
+
+function chainEntryModel(entry: Pick<ChainEntry, "adapterConfig">): string | null {
+  const model = entry.adapterConfig.model;
+  return typeof model === "string" && model.trim().length > 0 ? model : null;
+}
+
+/** Every key whose exhaustion row can block a chain entry: its account key and its account+model key. */
+export function exhaustionKeys(chain: ChainEntry[], accountKeys: (string | null)[]): string[] {
+  const keys = new Set<string>();
+  chain.forEach((entry, index) => {
+    const accountKey = accountKeys[index] ?? null;
+    if (accountKey === null) return;
+    keys.add(accountKey);
+    const model = chainEntryModel(entry);
+    if (model) keys.add(modelScopedKey(accountKey, model));
+  });
+  return [...keys];
+}
+
+/** Until when a connection is blocked: the later of its account and its account+model rows; undefined when neither. */
+export function connectionExhaustedUntil(
+  entry: Pick<ChainEntry, "adapterConfig">,
+  accountKey: string | null,
+  exhaustedUntil: Map<string, Date>,
+): Date | undefined {
+  if (accountKey === null) return undefined;
+  const model = chainEntryModel(entry);
+  const account = exhaustedUntil.get(accountKey);
+  const scoped = model ? exhaustedUntil.get(modelScopedKey(accountKey, model)) : undefined;
+  if (!account || !scoped) return account ?? scoped;
+  return account.getTime() >= scoped.getTime() ? account : scoped;
+}
+
 export function selectConnection(input: {
   chain: ChainEntry[];
   accountKeys: (string | null)[];
@@ -108,10 +145,9 @@ export function selectConnection(input: {
 }): { index: number; kind: ModelFallbackSelectionKind } {
   const { chain, accountKeys, exhaustedUntil, activeConnectionId, pinnedFinished, now } = input;
 
+  const untilOf = (index: number) => connectionExhaustedUntil(chain[index]!, accountKeys[index] ?? null, exhaustedUntil);
   const isExhausted = (index: number) => {
-    const key = accountKeys[index];
-    if (key == null) return false;
-    const until = exhaustedUntil.get(key);
+    const until = untilOf(index);
     return until !== undefined && until.getTime() > now.getTime();
   };
   // Ruling P10: only exhaustion makes the default unusable. An unresolvable default key (a responsible_user binding
@@ -133,9 +169,7 @@ export function selectConnection(input: {
   let earliestIndex = -1;
   let earliest = Infinity;
   for (let index = 0; index < chain.length; index += 1) {
-    const key = accountKeys[index];
-    if (key == null) continue;
-    const until = exhaustedUntil.get(key);
+    const until = untilOf(index);
     if (until && until.getTime() < earliest) {
       earliest = until.getTime();
       earliestIndex = index;

@@ -70,6 +70,8 @@ export const strings = Object.freeze({
       pinned_finished: "task done and default reset",
       fallback_unavailable: "fallback unavailable",
       account_unavailable: "account unavailable",
+      model_unusable: "model unavailable",
+      account_unusable: "account unavailable",
       disabled: "automatic switching turned off",
     } as Record<string, string>),
     reasonUnknown: "other reason",

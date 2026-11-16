@@ -24,7 +24,7 @@ import { aiConnectionService } from "../ai-connections.js";
 import { fetchCompanyQuotaWindows } from "../quota-windows.js";
 import { PROVIDER_QUOTA_RECOVERY_DEFAULT_BACKOFF_MS } from "../recovery/provider-quota-retry-at.js";
 import { boundRunIssueId } from "../run-task-binding.js";
-import { buildChain, type ChainEntry } from "./policy.js";
+import { buildChain, connectionExhaustedUntil, exhaustionKeys, type ChainEntry } from "./policy.js";
 
 const TIMELINE_LIMIT = 50;
 const QUOTA_WINDOW_TIMEOUT_MS = 5_000;
@@ -153,8 +153,9 @@ export async function readAgentModelFallbackView(
 
   const responsibleUserId = latestRun?.responsibleUserId ?? input.userId ?? null;
   const accountKeys = await input.accountKeysFor(agent, chain, responsibleUserId);
-  const keys = [...new Set(accountKeys.filter((key): key is string => key !== null))];
-  const aiConnectionIds = keys.filter((key) => key.startsWith("ai:")).map((key) => key.slice(3));
+  const keys = exhaustionKeys(chain, accountKeys);
+  const aiConnectionIds = [...new Set(accountKeys.filter((key): key is string => key?.startsWith("ai:") === true))]
+    .map((key) => key.slice(3));
 
   // While switching is off every run uses the default; a leftover state row (cleared at the next dispatch) is moot.
   const heldState = enabled ? state : null;
@@ -216,7 +217,7 @@ export async function readAgentModelFallbackView(
 
   const connections = chain.map((entry, index): AgentModelFallbackView["connections"][number] => {
     const accountKey = accountKeys[index] ?? null;
-    const until = accountKey ? exhaustedUntil.get(accountKey) : undefined;
+    const until = connectionExhaustedUntil(entry, accountKey, exhaustedUntil);
     const ownRuns = runs.filter((run) => connectionOfRun(run) === entry.id);
     const lastStarted = ownRuns.reduce<Date | null>((latest, run) =>
       run.startedAt && (!latest || run.startedAt > latest) ? run.startedAt : latest, null);

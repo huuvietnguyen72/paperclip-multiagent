@@ -8,7 +8,7 @@ import { pendingCaseHandoffForRun } from "./case-handoff-lifecycle.js";
 import { NON_RETRYABLE_PREFLIGHT_FAILURE_CODES, isHeartbeatRunTerminalStatus } from "./run-lifecycle.js";
 import { ChatControlRecoveryUnresolvedError } from "./queue.js";
 import { readTransientRecoveryContractFromRun, readHeartbeatRunErrorFamily, isTransientWorkspacePreparationCode } from "./retries.js";
-import { modelFallbackSwitchRetry, type ModelFallbackQuotaRecorder } from "../model-fallback/dispatch-wiring.js";
+import { modelFallbackSwitchRetry, modelFallbackUnusableTierRetry, type ModelFallbackQuotaRecorder } from "../model-fallback/dispatch-wiring.js";
 import { RemoteWorkspacePreparationTimeoutError } from "../remote-workspace-transport.js";
 import { type RunSessionOutcome, resolveNextSessionState, normalizeUsageTotals, resolveCacheAdjustedCostUsd, resolveLedgerBiller, resolveLedgerCostStatus, normalizeLedgerBillingType } from "./run-state.js";
 import { readGitConnectionFailure } from "../git-connection-failure.js";
@@ -935,9 +935,10 @@ export function createHeartbeatRunCompletion(db: Db, dependencies: HeartbeatRunC
           `[paperclip] Failed to resolve run presentation: ${err instanceof Error ? err.message : String(err)}\n`,
         );
       }
-      const modelFallbackRetry = outcome === "failed" && readHeartbeatRunErrorFamily(livenessRun) === "provider_quota"
-        ? await modelFallbackSwitchRetry(modelFallback, livenessRun, getAgent)
-        : null;
+      const modelFallbackRetry = outcome !== "failed" ? null
+        : readHeartbeatRunErrorFamily(livenessRun) === "provider_quota"
+          ? await modelFallbackSwitchRetry(modelFallback, livenessRun, getAgent)
+          : await modelFallbackUnusableTierRetry(modelFallback, livenessRun, getAgent);
       if (outcome === "failed" && isMaxTurnExhaustionRun(livenessRun)) {
         const policy = parseMaxTurnContinuationPolicy(agent);
         if (policy.enabled && policy.maxAttempts > 0) {
@@ -1507,7 +1508,9 @@ export function createHeartbeatRunCompletion(db: Db, dependencies: HeartbeatRunC
           );
         }
         if (livenessRun.errorCode !== PROJECT_ACCESS_DENIED) {
-          await (isTransientWorkspacePreparationCode(livenessRun.errorCode)
+          const modelFallbackRetry = await modelFallbackUnusableTierRetry(modelFallback, livenessRun, getAgent);
+          await (modelFallbackRetry ? scheduleBoundedRetryForRun(livenessRun, failedAgent, modelFallbackRetry)
+            : isTransientWorkspacePreparationCode(livenessRun.errorCode)
             ? scheduleBoundedRetryForRun(livenessRun, failedAgent)
             : scheduleInteractionContinuationInfrastructureRetryIfEligible(livenessRun, failedAgent)
           ).catch((retryError) => {

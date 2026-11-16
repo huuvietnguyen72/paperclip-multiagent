@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { buildChain, effectiveRunAgent, selectConnection, type ChainEntry } from "./policy.js";
+import {
+  buildChain, connectionExhaustedUntil, effectiveRunAgent, exhaustionKeys, modelScopedKey, selectConnection, type ChainEntry,
+} from "./policy.js";
 
 const CONN_B = "11111111-1111-4111-8111-111111111111";
 
@@ -154,5 +156,63 @@ describe("selectConnection", () => {
   it("an unresolvable fallback key is still skipped when choosing a fallback", () => {
     expect(select({ accountKeys: ["ai:a", null, "ai:c"], exhaustedUntil: new Map([["ai:a", later(1)]]) }))
       .toEqual({ index: 2, kind: "switch" });
+  });
+});
+
+describe("model-scoped unusable keys", () => {
+  // Two fallbacks on the same OpenCode Go login: GLM is switched off by the provider, DeepSeek still works.
+  const opencode = (id: string, model: string): ChainEntry =>
+    ({ id, adapterType: "opencode_local", adapterConfig: { model }, aiConnection: null });
+  const sameAccountChain = [entry("default"), opencode("glm", "opencode-go/glm-5.3"), opencode("deepseek", "opencode-go/deepseek-v4")];
+  const keys = ["ai:a", "login:opencode_local", "login:opencode_local"];
+  const glmOut = modelScopedKey("login:opencode_local", "opencode-go/glm-5.3");
+
+  it("builds <accountKey>#model:<model>", () => {
+    expect(glmOut).toBe("login:opencode_local#model:opencode-go/glm-5.3");
+  });
+
+  it("lists account and model keys for the exhaustion lookup", () => {
+    expect(exhaustionKeys(sameAccountChain, keys)).toEqual([
+      "ai:a", "ai:a#model:default", "login:opencode_local", glmOut, "login:opencode_local#model:opencode-go/deepseek-v4",
+    ]);
+    expect(exhaustionKeys(sameAccountChain, [null, null, "login:opencode_local"]))
+      .toEqual(["login:opencode_local", "login:opencode_local#model:opencode-go/deepseek-v4"]);
+  });
+
+  it("an unusable model blocks only that model; another model on the same account stays usable", () => {
+    const exhaustedUntil = new Map([["ai:a", later(1)], [glmOut, later(2)]]);
+    expect(selectConnection({ chain: sameAccountChain, accountKeys: keys, exhaustedUntil, activeConnectionId: null,
+      pinnedFinished: false, now })).toEqual({ index: 2, kind: "switch" });
+  });
+
+  it("an agent already on the unusable model moves on even with its task pinned", () => {
+    const exhaustedUntil = new Map([["ai:a", later(1)], [glmOut, later(2)]]);
+    expect(selectConnection({ chain: sameAccountChain, accountKeys: keys, exhaustedUntil, activeConnectionId: "glm",
+      pinnedFinished: false, now })).toEqual({ index: 2, kind: "switch" });
+  });
+
+  it("the model key expires like an account exhaustion", () => {
+    const exhaustedUntil = new Map([["ai:a", later(1)], [glmOut, later(-1)]]);
+    expect(selectConnection({ chain: sameAccountChain, accountKeys: keys, exhaustedUntil, activeConnectionId: "glm",
+      pinnedFinished: false, now })).toEqual({ index: 1, kind: "stay" });
+  });
+
+  it("an unusable account blocks every model on it", () => {
+    const exhaustedUntil = new Map([["login:opencode_local", later(1)]]);
+    expect(selectConnection({ chain: sameAccountChain, accountKeys: keys, exhaustedUntil, activeConnectionId: "glm",
+      pinnedFinished: false, now })).toEqual({ index: 0, kind: "switch" });
+  });
+
+  it("all unusable waits for the tier that frees up first, counting the later of its two keys", () => {
+    const exhaustedUntil = new Map([
+      ["ai:a", later(5)],
+      ["login:opencode_local", later(1)],
+      [glmOut, later(4)],
+    ]);
+    expect(selectConnection({ chain: sameAccountChain, accountKeys: keys, exhaustedUntil, activeConnectionId: null,
+      pinnedFinished: false, now })).toEqual({ index: 2, kind: "all_exhausted" });
+    expect(connectionExhaustedUntil(sameAccountChain[1]!, keys[1]!, exhaustedUntil)).toEqual(later(4));
+    expect(connectionExhaustedUntil(sameAccountChain[2]!, keys[2]!, exhaustedUntil)).toEqual(later(1));
+    expect(connectionExhaustedUntil(sameAccountChain[2]!, null, exhaustedUntil)).toBeUndefined();
   });
 });

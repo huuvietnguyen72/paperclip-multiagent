@@ -29,7 +29,10 @@ import {
   PROVIDER_QUOTA_RECOVERY_DEFAULT_BACKOFF_MS,
   resolveProviderQuotaRetryAt,
 } from "../recovery/provider-quota-retry-at.js";
-import { buildChain, readDispatchRecord, selectConnection, type ChainEntry, type ModelFallbackSelectionKind } from "./policy.js";
+import { classifyFallbackFailure, type FallbackFailureKind } from "./classify.js";
+import {
+  buildChain, exhaustionKeys, modelScopedKey, readDispatchRecord, selectConnection, type ChainEntry, type ModelFallbackSelectionKind,
+} from "./policy.js";
 import { readAgentModelFallbackView } from "./view.js";
 
 export type AgentRow = typeof agents.$inferSelect;
@@ -87,7 +90,21 @@ export function formatLocalClock(date: Date): string {
   return `${pad(date.getHours())}:${pad(date.getMinutes())}`;
 }
 
-export function switchedComment(input: { fromModel: string; resetAt: Date | null; toLabel: string }): string {
+const UNUSABLE_CAUSES: Record<FallbackFailureKind, string> = {
+  model_unusable: "model bị tắt",
+  account_unusable: "tài khoản không truy cập được",
+};
+
+export function switchedComment(input: {
+  fromModel: string;
+  resetAt: Date | null;
+  toLabel: string;
+  /** Set when the connection was left because it cannot run (not because it ran out of tokens). */
+  unusable?: FallbackFailureKind;
+}): string {
+  if (input.unusable) {
+    return `${input.fromModel} không dùng được (${UNUSABLE_CAUSES[input.unusable]}) → chuyển sang ${input.toLabel} để làm tiếp.`;
+  }
   if (!input.resetAt) return `${input.fromModel} không dùng được → chuyển sang ${input.toLabel} để làm tiếp.`;
   return `${input.fromModel} hết token (reset ${formatLocalClock(input.resetAt)}) → chuyển sang ${input.toLabel} để làm tiếp.`;
 }
@@ -125,8 +142,9 @@ function configuredConnection(agent: AgentRow, connectionId: string): Pick<Chain
 
 type DbOrTx = Pick<Db, "select" | "insert" | "update">;
 
-async function loadExhaustions(db: DbOrTx, companyId: string, accountKeys: (string | null)[]) {
-  const keys = [...new Set(accountKeys.filter((key): key is string => key !== null))];
+/** Exhaustion rows for the chain: account keys and account+model keys (see exhaustionKeys). */
+async function loadExhaustions(db: DbOrTx, companyId: string, chain: ChainEntry[], accountKeys: (string | null)[]) {
+  const keys = exhaustionKeys(chain, accountKeys);
   const exhaustedUntil = new Map<string, Date>();
   if (!keys.length) return exhaustedUntil;
   const rows = await db
@@ -146,6 +164,39 @@ async function pinnedIssuesFinished(db: DbOrTx, companyId: string, agentId: stri
     .where(and(eq(issues.companyId, companyId), inArray(issues.id, pinnedIssueIds)));
   return rows.every((row) =>
     MODEL_FALLBACK_FINISHED_ISSUE_STATUSES.includes(row.status) || row.assigneeAgentId !== agentId);
+}
+
+type SwitchReason = "account_exhausted" | "account_unavailable" | FallbackFailureKind;
+
+/**
+ * Why the agent leaves `from`. Only an unusable mark writes an account+model row; an account row is an exhaustion unless
+ * the fallback run that wrote it failed because the account itself cannot run.
+ */
+async function switchReason(
+  db: DbOrTx,
+  companyId: string,
+  from: ChainEntry,
+  fromKey: string | null,
+  exhaustedUntil: Map<string, Date>,
+  at: Date,
+): Promise<{ reason: SwitchReason; resetAt: Date | null }> {
+  if (!fromKey) return { reason: "account_unavailable", resetAt: null };
+  const ahead = (until: Date | undefined): until is Date => until !== undefined && until.getTime() > at.getTime();
+  const accountUntil = exhaustedUntil.get(fromKey);
+  if (ahead(accountUntil)) {
+    const source = await db
+      .select({ errorCode: heartbeatRuns.errorCode, error: heartbeatRuns.error, resultJson: heartbeatRuns.resultJson,
+        runnerProfileJson: heartbeatRuns.runnerProfileJson })
+      .from(modelAccountExhaustions)
+      .innerJoin(heartbeatRuns, and(eq(heartbeatRuns.id, modelAccountExhaustions.sourceRunId), eq(heartbeatRuns.companyId, companyId)))
+      .where(and(eq(modelAccountExhaustions.companyId, companyId), eq(modelAccountExhaustions.accountKey, fromKey)))
+      .then((rows) => rows[0] ?? null);
+    if (source && classifyFallbackFailure(source)?.kind === "account_unusable") return { reason: "account_unusable", resetAt: null };
+    return { reason: "account_exhausted", resetAt: accountUntil };
+  }
+  const model = entryModel(from);
+  if (model && ahead(exhaustedUntil.get(modelScopedKey(fromKey, model)))) return { reason: "model_unusable", resetAt: null };
+  return { reason: "account_unavailable", resetAt: null };
 }
 
 /** In the exhaustion upsert: the stored column while its reset is ahead of `at` and not earlier than the new one. */
@@ -327,7 +378,7 @@ export function createModelFallbackService(db: Db, deps: ModelFallbackServiceDep
 
       let state = await lockState();
       for (;;) {
-        const exhaustedUntil = await loadExhaustions(tx, agent.companyId, accountKeys);
+        const exhaustedUntil = await loadExhaustions(tx, agent.companyId, chain, accountKeys);
         const pins = state?.pinnedIssueIds ?? [];
         const activeConnectionId = state?.activeConnectionId ?? null;
         const pinnedFinished = await pinnedIssuesFinished(tx, agent.companyId, agent.id, pins);
@@ -344,12 +395,10 @@ export function createModelFallbackService(db: Db, deps: ModelFallbackServiceDep
         let comment: Omit<PendingComment, "runId" | "issueId"> | null = null;
 
         if (kind === "switch") {
-          const fromKey = accountKeys[fromIndex] ?? null;
-          const fromUntil = fromKey ? exhaustedUntil.get(fromKey) : undefined;
-          const resetAt = fromUntil && fromUntil.getTime() > at.getTime() ? fromUntil : null;
-          const reason = resetAt ? "account_exhausted" : "account_unavailable";
           const from = chain[fromIndex]!;
           const to = chain[selection.index]!;
+          const { reason, resetAt } = await switchReason(tx, agent.companyId, from, accountKeys[fromIndex] ?? null, exhaustedUntil, at);
+          const unusable = reason === "model_unusable" || reason === "account_unusable" ? reason : undefined;
           patch = {
             activeConnectionId: to.id,
             pinnedIssueIds: runIssueId && !pins.includes(runIssueId) ? [...pins, runIssueId] : pins,
@@ -365,7 +414,11 @@ export function createModelFallbackService(db: Db, deps: ModelFallbackServiceDep
             },
           };
           comment = {
-            body: switchedComment({ fromModel: entryModel(from) ?? connectionLabel(from), resetAt, toLabel: connectionLabel(to) }),
+            body: switchedComment({
+              // An unusable connection is named with its harness: the same model may still run elsewhere.
+              fromModel: unusable ? connectionLabel(from) : entryModel(from) ?? connectionLabel(from),
+              resetAt, toLabel: connectionLabel(to), unusable,
+            }),
             title: `Chuyển sang ${connectionLabel(to)}`,
           };
         } else if (kind === "return") {
@@ -436,26 +489,62 @@ export function createModelFallbackService(db: Db, deps: ModelFallbackServiceDep
     return { adapterType: entry.adapterType, record: toRecord(chain, accountKeys, outcome.index, outcome.kind), kind: outcome.kind, entry };
   }
 
+  /** The agent's "wait when no reset time is known", else the recovery service's default. */
+  function noResetBackoffMs(agent: AgentRow): number {
+    const config = modelFallbackConfigSchema.safeParse(parseObject(agent.runtimeConfig).modelFallback);
+    const waitMinutes = config.success ? config.data.noResetWaitMinutes : undefined;
+    return waitMinutes ? waitMinutes * 60_000 : PROVIDER_QUOTA_RECOVERY_DEFAULT_BACKOFF_MS;
+  }
+
   async function recordQuotaFailure(input: { run: HeartbeatRunRow; agent: AgentRow }): Promise<{ retryNow: boolean }> {
     const { run, agent } = input;
     const record = readDispatchRecord(run);
     if (!record || record.accountKey === null || run.companyId !== agent.companyId) return { retryNow: false };
 
     const at = now();
-    const config = modelFallbackConfigSchema.safeParse(parseObject(agent.runtimeConfig).modelFallback);
-    const waitMinutes = config.success ? config.data.noResetWaitMinutes : undefined;
-    const backoffMs = waitMinutes ? waitMinutes * 60_000 : PROVIDER_QUOTA_RECOVERY_DEFAULT_BACKOFF_MS;
     // Like the recovery service, search the whole failure text so a reset inside resultJson is found.
     const errorText = [run.errorCode, run.error, JSON.stringify(run.resultJson ?? {})]
       .filter((part): part is string => typeof part === "string" && part.length > 0)
       .join(" ");
-    const { retryAt, parsedResetTime } = resolveProviderQuotaRetryAt({ error: errorText, resultJson: run.resultJson }, at, backoffMs);
+    const { retryAt, parsedResetTime } = resolveProviderQuotaRetryAt(
+      { error: errorText, resultJson: run.resultJson }, at, noResetBackoffMs(agent));
+    await markExhausted({ run, accountKey: record.accountKey, retryAt, parsedResetTime, at });
+    await pinFailedIssueWhileOnFallback(run, agent, at);
+    return { retryNow: await anotherConnectionUsableNow(run, agent, record.connectionId, at) };
+  }
 
+  /**
+   * A run on a FALLBACK connection failed because that connection cannot run (a model the provider refuses, or an
+   * account that cannot authenticate). The connection is marked like an exhausted account for the no-reset cool-down,
+   * so the next claim moves on and, after the cool-down, tries it again. Runs on the default are never marked.
+   */
+  async function recordUnusableFailure(input: { run: HeartbeatRunRow; agent: AgentRow }): Promise<{ retryNow: boolean }> {
+    const { run, agent } = input;
+    const record = readDispatchRecord(run);
+    if (!record?.isFallback || record.accountKey === null || run.companyId !== agent.companyId) return { retryNow: false };
+    const classification = classifyFallbackFailure(run);
+    if (!classification) return { retryNow: false };
+
+    const at = now();
+    // Without a recorded model (the harness's own default) the account key is the narrowest key the chain can see.
+    const accountKey = classification.kind === "model_unusable" && record.model
+      ? modelScopedKey(record.accountKey, record.model)
+      : record.accountKey;
+    const retryAt = new Date(at.getTime() + noResetBackoffMs(agent));
+    await markExhausted({ run, accountKey, retryAt, parsedResetTime: false, at });
+    await pinFailedIssueWhileOnFallback(run, agent, at);
+    logger.warn({ companyId: run.companyId, agentId: agent.id, runId: run.id, connectionId: record.connectionId,
+      accountKey, kind: classification.kind, until: retryAt.toISOString() }, "model fallback connection marked unusable");
+    return { retryNow: await anotherConnectionUsableNow(run, agent, record.connectionId, at) };
+  }
+
+  async function markExhausted(input: { run: HeartbeatRunRow; accountKey: string; retryAt: Date; parsedResetTime: boolean; at: Date }) {
+    const { run, accountKey, retryAt, parsedResetTime, at } = input;
     await db
       .insert(modelAccountExhaustions)
       .values({
         companyId: run.companyId,
-        accountKey: record.accountKey,
+        accountKey,
         exhaustedUntil: retryAt,
         sourceRunId: run.id,
         parsedResetTime,
@@ -472,8 +561,10 @@ export function createModelFallbackService(db: Db, deps: ModelFallbackServiceDep
           updatedAt: at,
         },
       });
+  }
 
-    // Rule 12: a task that fails while the agent is already on a fallback also holds the agent there.
+  /** Rule 12: a task that fails while the agent is already on a fallback also holds the agent there. */
+  async function pinFailedIssueWhileOnFallback(run: HeartbeatRunRow, agent: AgentRow, at: Date) {
     const failedIssueId = boundRunIssueId(run);
     if (failedIssueId) {
       const issueJson = JSON.stringify([failedIssueId]);
@@ -491,16 +582,19 @@ export function createModelFallbackService(db: Db, deps: ModelFallbackServiceDep
           isNotNull(agentModelFallbackStates.activeConnectionId),
         ));
     }
+  }
 
+  /** Ruling P1: retry now only when the selection after marking moves to a usable connection other than the failed one. */
+  async function anotherConnectionUsableNow(run: HeartbeatRunRow, agent: AgentRow, failedConnectionId: string, at: Date) {
     const chain = buildChain(agent);
-    if (chain.length <= 1) return { retryNow: false };
+    if (chain.length <= 1) return false;
     const accountKeys = await chainAccountKeys(agent, chain, run.responsibleUserId ?? null);
-    const exhaustedUntil = await loadExhaustions(db, agent.companyId, accountKeys);
-    const failedIndex = Math.max(0, chain.findIndex((entry) => entry.id === record.connectionId));
+    const exhaustedUntil = await loadExhaustions(db, agent.companyId, chain, accountKeys);
+    const failedIndex = Math.max(0, chain.findIndex((entry) => entry.id === failedConnectionId));
     const selection = selectConnection({
-      chain, accountKeys, exhaustedUntil, activeConnectionId: record.connectionId, pinnedFinished: false, now: at,
+      chain, accountKeys, exhaustedUntil, activeConnectionId: failedConnectionId, pinnedFinished: false, now: at,
     });
-    return { retryNow: (selection.kind === "switch" || selection.kind === "return") && selection.index !== failedIndex };
+    return (selection.kind === "switch" || selection.kind === "return") && selection.index !== failedIndex;
   }
 
   async function readAgentView(input: { companyId: string; agentId: string; now?: Date; userId?: string | null }): Promise<AgentModelFallbackView> {
@@ -534,5 +628,5 @@ export function createModelFallbackService(db: Db, deps: ModelFallbackServiceDep
     return active;
   }
 
-  return { accountKeyFor, selectForDispatch, recordQuotaFailure, readAgentView, readCompanyActive };
+  return { accountKeyFor, selectForDispatch, recordQuotaFailure, recordUnusableFailure, readAgentView, readCompanyActive };
 }

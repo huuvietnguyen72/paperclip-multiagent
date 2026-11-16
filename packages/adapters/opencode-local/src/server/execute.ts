@@ -53,7 +53,7 @@ import {
   readPaperclipIssueWorkModeFromContext,
   resolveLegacyPaperclipDesiredSkillNames,
 } from "@paperclipai/adapter-utils/server-utils";
-import { isOpenCodeUnknownSessionError, parseOpenCodeJsonl, createOpenCodeJsonlParser } from "./parse.js";
+import { isOpenCodeUnknownSessionError, openCodeModelUnavailableFailure, parseOpenCodeJsonl, createOpenCodeJsonlParser } from "./parse.js";
 import {
   ensureOpenCodeModelConfiguredAndAvailable,
   isTruthyEnvFlag,
@@ -846,6 +846,7 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
         stderrLine ||
         `OpenCode exited with code ${synthesizedExitCode ?? -1}`;
       const modelId = model || null;
+      const providerFailure = (synthesizedExitCode ?? 0) === 0 ? null : openCodeModelUnavailableFailure(fallbackErrorMessage);
 
       return {
         exitCode: synthesizedExitCode,
@@ -873,6 +874,7 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
           adapterExecutionTimeout,
           stdout: attempt.proc.stdout,
           stderr: attempt.proc.stderr,
+          ...(providerFailure ? { providerFailure } : {}),
         },
         summary: attempt.parsed.summary,
         clearSession: Boolean(clearSessionOnMissingSession && !attempt.parsed.sessionId),
