@@ -91,11 +91,23 @@ describe("TaskRunChangesPanel", () => {
     mocks.list.mockResolvedValue([
       run("r3", { status: "no_changes", files: [], additions: 0, deletions: 0 }),
       run("r2", { status: "no_changes", files: [], additions: 0, deletions: 0 }),
-      run("r1", { status: "skipped", reason: "not_git", files: [], additions: 0, deletions: 0 }),
+      run("r1", { status: "incomplete", reason: "workspace_missing", files: [], additions: 0, deletions: 0 }),
     ]);
     await render();
     expect(container.textContent).toContain("2 runs without code changes");
-    expect(container.textContent).toContain("workspace is not a git repository");
+    expect(container.textContent).toContain("the workspace was removed before the run finished");
+  });
+
+  it("groups runs outside a git workspace instead of listing each one", async () => {
+    mocks.list.mockResolvedValue([
+      run("r3", { status: "skipped", reason: "not_git", files: [], additions: 0, deletions: 0 }),
+      run("r2", { status: "skipped", reason: "remote", files: [], additions: 0, deletions: 0 }),
+      run("r1", { status: "skipped", reason: "timeout", files: [], additions: 0, deletions: 0 }),
+    ]);
+    await render();
+    expect(container.textContent).toContain("2 runs outside a git workspace");
+    expect(container.querySelectorAll("[data-run-id]")).toHaveLength(1);
+    expect(container.textContent).toContain("snapshot timed out");
   });
 
   it("warns when another run overlapped or the branch changed", async () => {

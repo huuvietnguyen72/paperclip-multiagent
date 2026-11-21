@@ -171,8 +171,12 @@ export function TaskRunChangesPanel({ issueId }: { issueId: string }) {
   if (query.isLoading) return <p className="text-sm text-muted-foreground">Loading changes…</p>;
   if (query.isError) return <p className="text-sm text-destructive">Could not load the changes for this task.</p>;
   const entries = query.data ?? [];
-  const shown = entries.filter((entry) => entry.status !== "no_changes");
-  const withoutChanges = entries.length - shown.length;
+  // Runs with nothing to show are summarised, not listed: no changes, or a workspace that is not git.
+  const outsideGit = (entry: IssueRunChangesEntry) =>
+    entry.status === "skipped" && (entry.reason === "not_git" || entry.reason === "remote");
+  const shown = entries.filter((entry) => entry.status !== "no_changes" && !outsideGit(entry));
+  const withoutChanges = entries.filter((entry) => entry.status === "no_changes").length;
+  const notGit = entries.filter(outsideGit).length;
   if (entries.length === 0) {
     return <p className="text-sm text-muted-foreground">No code changes recorded for this task yet. Each agent run that edits files in a git workspace appears here.</p>;
   }
@@ -184,6 +188,9 @@ export function TaskRunChangesPanel({ issueId }: { issueId: string }) {
       ))}
       {withoutChanges > 0 ? (
         <p className="px-1 text-xs text-muted-foreground">{withoutChanges} {withoutChanges === 1 ? "run" : "runs"} without code changes</p>
+      ) : null}
+      {notGit > 0 ? (
+        <p className="px-1 text-xs text-muted-foreground">{notGit} {notGit === 1 ? "run" : "runs"} outside a git workspace</p>
       ) : null}
     </div>
   );
