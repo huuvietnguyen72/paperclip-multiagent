@@ -2796,6 +2796,7 @@ export * from "./agent-appearance.js";
 export * from "./ai-connections.js";
 export * from "./ai-connection-router.js";
 export * from "./model-fallback.js";
+export * from "./run-changes.js";
 export * from "./ai-connection-usage.js";
 export * from "./subscriptions.js";
 export * from "./types/email.js";
