@@ -35,6 +35,7 @@ export type TaskSidePanelTabPayload =
   | { kind: "properties" }
   | { kind: "subtasks" }
   | { kind: "artifacts" }
+  | { kind: "changes" }
   | { kind: "agent-tasks" }
   | { kind: "attachment"; attachmentId: string }
   | { kind: "skill"; skillId: string }
@@ -98,6 +99,7 @@ function parsePayload(value: unknown): TaskSidePanelTabPayload | null {
   if (kind === "properties") return { kind };
   if (kind === "subtasks") return { kind };
   if (kind === "artifacts") return { kind };
+  if (kind === "changes") return { kind };
   if (kind === "agent-tasks") return { kind };
   if (kind === "attachment") {
     return typeof input.attachmentId === "string" && input.attachmentId.length > 0 ? { kind, attachmentId: input.attachmentId } : null;
@@ -237,6 +239,10 @@ export function taskPanelAgentTasksTab(): SidePanelTabRecord<TaskSidePanelTabPay
 
 export function taskPanelArtifactsTab(): SidePanelTabRecord<TaskSidePanelTabPayload> {
   return { id: "artifacts", type: "artifacts", label: "Artifacts", closable: true, contentMode: "padded", payload: { kind: "artifacts" } };
+}
+
+export function taskPanelChangesTab(): SidePanelTabRecord<TaskSidePanelTabPayload> {
+  return { id: "changes", type: "changes", label: "Changes", closable: true, contentMode: "padded", payload: { kind: "changes" } };
 }
 
 export function taskPanelSkillTab(skillId: string, label = "Skill"): SidePanelTabRecord<TaskSidePanelTabPayload> {

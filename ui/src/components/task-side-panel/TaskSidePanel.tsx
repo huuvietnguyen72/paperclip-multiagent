@@ -1,4 +1,5 @@
 import { CoordinatorConversationTasksPanel } from "@/components/coordinator/CoordinatorConversationTasksPanel";
+import { TaskRunChangesPanel } from "./TaskRunChangesPanel";
 import { useCoordinatorWorkspaceEnabled } from "@/hooks/useCoordinatorWorkspaceEnabled";
 import { TextAttachmentContext } from "@/context/TextAttachmentContext";
 import { TaskAttachmentPanel } from "./TaskAttachmentPanel";
@@ -25,6 +26,7 @@ import {
   Globe,
   AppWindow,
   Box,
+  GitCompare,
   FileCode2,
   FileText,
   FolderOpen,
@@ -83,6 +85,7 @@ import {
   taskPanelPluginTab,
   taskPanelAgentTasksTab,
   taskPanelArtifactsTab,
+  taskPanelChangesTab,
   taskPanelAttachmentTab,
   taskPanelDocumentTab,
   taskPanelFilesTab,
@@ -149,6 +152,7 @@ function tabIcon(tab: SidePanelTabRecord<TaskSidePanelTabPayload>): ReactNode {
     case "properties": return <SlidersHorizontal />;
     case "subtasks": return <ListTree />;
     case "artifacts": return <Box />;
+    case "changes": return <GitCompare />;
     case "agent-tasks": return <ListChecks />;
     case "attachment": return <FileText />;
     case "files-browser": return <FolderOpen />;
@@ -651,6 +655,7 @@ function TaskSidePanelForScope({
       { id: "properties", label: "Properties", icon: <SlidersHorizontal />, alreadyOpen: controller.tabs.some((tab) => tab.id === "properties") },
       ...(subtasksAvailable ? [{ id: "subtasks", label: taskLabel, description: tasksTab?.hasError ? "Could not load all tasks" : `${taskCount} total`, icon: <ListTree />, alreadyOpen: controller.tabs.some((tab) => tab.id === "subtasks") }] : []),
       { id: "artifacts", label: "Artifacts", icon: <Box />, alreadyOpen: controller.tabs.some((tab) => tab.id === "artifacts") },
+      { id: "changes", label: "Changes", description: "What each agent run edited", icon: <GitCompare />, alreadyOpen: controller.tabs.some((tab) => tab.id === "changes") },
     ];
     for (const [index, browser] of (browsersQuery.data ?? []).entries()) {
       primary.push({ id: `browser:${browser.id}`, label: (browsersQuery.data?.length ?? 0) > 1 ? `Browser ${index + 1}` : "Browser", description: browser.status, icon: <Globe />, alreadyOpen: controller.tabs.some(tab => tab.id === `browser:${browser.id}`) });
@@ -724,6 +729,7 @@ function TaskSidePanelForScope({
       });
     }
     else if (item.id === "artifacts") controller.openTab(taskPanelArtifactsTab());
+    else if (item.id === "changes") controller.openTab(taskPanelChangesTab());
     else if (item.id === "agent-tasks") controller.openTab(taskPanelAgentTasksTab());
     else if (item.id === "files") {
       controller.openTab(taskPanelFilesTab());
@@ -839,6 +845,8 @@ function TaskSidePanelForScope({
         ? <CoordinatorConversationTasksPanel conversationIssueId={issue.id} />
         : <AgentTasksPanel companyId={issue.companyId} agentId={conversationAgentId} excludeIssueId={issue.id} />
     ) : null;
+  } else if (activeTab.payload.kind === "changes") {
+    content = <TaskRunChangesPanel issueId={issue.id} />;
   } else if (activeTab.payload.kind === "artifacts" && conversationAgentId) {
     content = (
       <div className="space-y-4">

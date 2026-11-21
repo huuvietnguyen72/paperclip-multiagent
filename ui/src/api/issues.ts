@@ -1,3 +1,4 @@
+import type { IssueRunChangesEntry, RunChangeFilePatch } from "@paperclipai/shared";
 import type { SetIssueTitle } from "@paperclipai/shared";
 import { ISSUE_SUMMARIES_MAX_IDS } from "@paperclipai/shared";
 import type { IssueSummary } from "@paperclipai/shared";
@@ -788,6 +789,9 @@ export const issuesApi = {
   setVisibility: (id: string, visibility: IssueVisibility) =>
     api.patch<IssueUpdateResponse>(`/issues/${id}`, { visibility }),
   listApprovals: (id: string) => api.get<Approval[]>(`/issues/${id}/approvals`),
+  listRunChanges: (id: string) => api.get<IssueRunChangesEntry[]>(`/issues/${id}/run-changes`),
+  getRunChangeFile: (id: string, runId: string, path: string) =>
+    api.get<RunChangeFilePatch>(`/issues/${id}/run-changes/${runId}/file?path=${encodeURIComponent(path)}`),
   linkApproval: (id: string, approvalId: string) =>
     api.post<Approval[]>(`/issues/${id}/approvals`, { approvalId }),
   unlinkApproval: (id: string, approvalId: string) =>

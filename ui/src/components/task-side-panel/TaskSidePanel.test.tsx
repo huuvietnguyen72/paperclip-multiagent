@@ -112,6 +112,7 @@ vi.mock("@/components/WorkspaceFileBrowser", () => ({
 
 vi.mock("./TaskAttachmentPanel", () => ({ TaskAttachmentPanel: ({ attachmentId }: { attachmentId: string }) => <div>Text file {attachmentId}</div> }));
 
+vi.mock("./TaskRunChangesPanel", () => ({ TaskRunChangesPanel: ({ issueId }: { issueId: string }) => <div>Run changes for {issueId}</div> }));
 vi.mock("./TaskDocumentPanel", () => ({
   TaskDocumentPanel: ({ documentKey, issueId, revisionId, documentIssueId, currentIssueId, initialDocument }: { documentKey: string; issueId: string; revisionId?: string; documentIssueId?: string; currentIssueId?: string; initialDocument?: IssueDocument }) => <div data-document-owner={issueId} data-gallery-owner={documentIssueId} data-current-task={currentIssueId} data-revision-id={revisionId} data-initial-document={initialDocument?.id}>{`Document ${documentKey}`}</div>,
 }));
@@ -213,6 +214,17 @@ describe("TaskSidePanel", () => {
     expect(artifacts).toBeTruthy();
     await act(async () => artifacts!.click());
     expect(artifactsTabRender).toHaveBeenCalledWith(expect.objectContaining({ documentEditor }));
+  });
+
+  it("opens the Changes tab from the launcher", async () => {
+    await render(panel());
+    await act(async () => container.querySelector<HTMLButtonElement>('button[aria-label="Open a new tab"]')?.click());
+    const item = Array.from(document.body.querySelectorAll<HTMLElement>('[role="option"]'))
+      .find(option => option.textContent?.includes("Changes"));
+    expect(item).not.toBeUndefined();
+    await act(async () => item!.click());
+    expect(container.textContent).toMatch(/Run changes for \S+/);
+    expect(container.querySelector('[data-side-panel-tab-target="changes"]')).not.toBeNull();
   });
 
   it("offers idle plugin views in the launcher without opening them automatically", async () => {

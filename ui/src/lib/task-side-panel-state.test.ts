@@ -8,6 +8,7 @@ import {
   taskPanelFilesTab,
   taskPanelPropertiesTab,
   taskPanelSkillTab,
+  taskPanelChangesTab,
   taskPanelSubtasksTab,
   writeTaskSidePanelState,
   shouldSuppressTaskPanelUntilPlan,
@@ -50,6 +51,20 @@ describe("task side-panel persistence", () => {
     expect(readTaskSidePanelState("user-1", "company-1", "task-1", true)).toMatchObject({
       state: { tabs: [], activeTabId: null },
       userInteracted: true,
+    });
+  });
+
+  it("persists and restores the Changes tab", () => {
+    writeTaskSidePanelState("user-1", "company-1", "task-changes", {
+      state: { tabs: [taskPanelPropertiesTab(), taskPanelChangesTab()], activeTabId: "changes" },
+      launcherOpen: false,
+      userInteracted: true,
+      autoPlanHandled: false,
+      updatedAt: 1,
+    });
+    expect(readTaskSidePanelState("user-1", "company-1", "task-changes", true)?.state).toMatchObject({
+      activeTabId: "changes",
+      tabs: [{ id: "properties" }, { id: "changes", label: "Changes", payload: { kind: "changes" } }],
     });
   });
 

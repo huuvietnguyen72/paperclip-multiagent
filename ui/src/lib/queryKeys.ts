@@ -421,6 +421,10 @@ export const queryKeys = {
       ["issues", "runner-goal", issueId, agentId ?? "__effective__"] as const,
     workProducts: (issueId: string) =>
       ["issues", "work-products", issueId] as const,
+    runChanges: (issueId: string) =>
+      ["issues", "run-changes", issueId] as const,
+    runChangeFile: (issueId: string, runId: string, path: string) =>
+      ["issues", "run-changes", issueId, runId, path] as const,
     workProductPullRequestRefresh: (issueId: string) =>
       ["issues", "work-product-pr-refresh", issueId] as const,
     fileResources: (
