@@ -1,4 +1,5 @@
 import { confirmMcpAttachmentCleanup, recordMcpAttachmentCleanup, type McpAttachmentCleanup } from "../services/public-mcp/upload-cleanup.js";
+import { createRunChangesService } from "../services/run-changes/service.js";
 import { notifyDeferredExecutionWork } from "../services/deferred-execution-notifications.js";
 import { notifyNativeRecoveryNotices } from "../services/native-recovery-notice-notifications.js";
 import { notifyNativeStatusReassessment } from "../services/native-status-reassessment-notifications.js";
@@ -3511,6 +3512,7 @@ export function issueRoutes(
   const issueApprovalsSvc = issueApprovalService(db);
   const recoveryActionsSvc = issueRecoveryActionService(db);
   const executionWorkspacesSvc = executionWorkspaceServiceDirect(db, { pluginWorkerManager: opts.pluginWorkerManager });
+  const runChangesSvc = createRunChangesService(db);
   const workProductsSvc = workProductService(db);
   const documentsSvc = documentService(db);
   const artifactReviewDocumentsSvc = artifactReviewDocumentService(db, storage);
@@ -10571,6 +10573,32 @@ export function issueRoutes(
       refreshPullRequests: req.query.refreshPullRequests === "true",
     });
     res.json(workProducts);
+  });
+
+  router.get("/issues/:id/run-changes", async (req, res) => {
+    const id = req.params.id as string;
+    const issue = await getAccessibleResource(req, res, getIssueById(req, id), "Issue not found");
+    if (!issue) return;
+    if (!(await assertIssueReadAllowed(req, res, issue))) return;
+    res.json(await runChangesSvc.listForIssue(issue.companyId, issue.id));
+  });
+
+  router.get("/issues/:id/run-changes/:runId/file", async (req, res) => {
+    const id = req.params.id as string;
+    const filePath = typeof req.query.path === "string" ? req.query.path : "";
+    if (!filePath) {
+      res.status(400).json({ error: "path is required" });
+      return;
+    }
+    const issue = await getAccessibleResource(req, res, getIssueById(req, id), "Issue not found");
+    if (!issue) return;
+    if (!(await assertIssueReadAllowed(req, res, issue))) return;
+    const patch = await runChangesSvc.getFilePatch(issue.companyId, req.params.runId as string, filePath, issue.id);
+    if (!patch) {
+      res.status(404).json({ error: "File change not found" });
+      return;
+    }
+    res.json(patch);
   });
 
   router.get("/issues/:id/external-objects", async (req, res) => {
