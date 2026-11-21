@@ -110,11 +110,11 @@ Bảng mới `heartbeat_run_changes`, mỗi lượt chạy một dòng:
 Đều kiểm tra quyền xem task và công ty (board, hoặc agent có quyền với task):
 
 - `GET /api/issues/:id/run-changes`: danh sách lượt chạy của task có dữ liệu thay đổi, mới nhất trước. Mỗi mục gồm: run, agent, thời gian, trạng thái lượt chạy, tổng `+/−`, số file, `files[]` (không kèm patch), `commands[]`, ghi chú.
-- `GET /api/heartbeat-runs/:runId/changes/file?path=...`: patch của một file. Giao diện chỉ tải khi người dùng mở file đó.
+- `GET /api/issues/:id/run-changes/:runId/file?path=...`: patch của một file. Giao diện chỉ tải khi người dùng mở file đó. Đặt dưới đường dẫn của task để dùng lại đúng bộ kiểm tra quyền của task.
 
 ### 5.6 Giao diện: tab "Changes" trong trang task
 
-Đặt cạnh các tab hiện có của `IssueDetail` (chat, activity, related-work).
+Đặt trong **khung bên phải của task** (`TaskSidePanel`), cạnh tab Artifacts. Giao diện task mặc định (chat shell) ẩn dải tab ở giữa trang, nên đây là chỗ chủ instance thực sự nhìn thấy.
 
 ```
 Changes
