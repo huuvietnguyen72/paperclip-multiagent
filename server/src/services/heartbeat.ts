@@ -361,6 +361,7 @@ import {
 import { conflict, HttpError, notFound } from "../errors.js";
 
 import { logger } from "../middleware/logger.js";
+import { createRunChangesService } from "./run-changes/service.js";
 import { publishLiveEvent } from "./live-events.js";
 
 import {
@@ -1789,6 +1790,7 @@ export function heartbeatService(
     nativeSessionResumeDispatchTimers.set(runId, timer);
   }
 
+  const runChanges = createRunChangesService(db);
   const runCompletion = createHeartbeatRunCompletion(db, {
     getRun,
     getAgent,
@@ -2804,6 +2806,9 @@ export function heartbeatService(
           appendRunEvent,
         },
       }));
+      // Per-run code changes ("Changes" panel): best effort, never blocks or fails the run.
+      void runChanges.recordRunStart({ run: run!, executionWorkspace, persistedExecutionWorkspace, executionTarget: executionTarget ?? null, issueId: issueId ?? null })
+        .catch((err) => logger.warn({ err, runId: run!.id }, "run changes: start capture failed"));
       const preparedInstructions = instructionWorkingCopy = createHeartbeatInstructionWorkingCopy({
         observabilityCompatibilityKey: observability?.compatibilityKey,
         db, instructionCopies, readRun: () => run!, agent, context,

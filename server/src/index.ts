@@ -53,6 +53,7 @@ import { markGitRestorePointExpired } from "./services/git-restore-point-storage
 import { subscribeAllCompanyLiveEvents } from "./services/live-events.js";
 import { DELIVERY_QUEUES } from "./services/delivery-work-notifications.js";
 import { registerBudgetEnforcementWork, registerCostAccountingWork } from "./services/budget-enforcement-worker.js";
+import { createRunChangesService, registerRunChangesWork } from "./services/run-changes/index.js";
 import { caseHandoffDeliveryService } from "./services/case-handoff-delivery.js";
 import { registerScheduledWork } from "./services/scheduled-work.js";
 import type { createDeliveryWorkCoordinator } from "./services/delivery-work-coordinator.js";
@@ -1333,6 +1334,8 @@ async function startServerWithDatabaseTeardown(
   });
   const accountingWorker = registerCostAccountingWork(db, deliveryWork, accountingHeartbeat.reconcileCostAccounting);
   server.on("close", accountingWorker.stop);
+  const runChangesWorker = registerRunChangesWork(deliveryWork, createRunChangesService(db));
+  server.on("close", runChangesWorker.stop);
   skillSourceSync.start(deliveryWork);
   skillPackageWork(db).start(deliveryWork);
   const runtimeAssetCleanup = runtimeAssetRetention(db).start(deliveryWork);
