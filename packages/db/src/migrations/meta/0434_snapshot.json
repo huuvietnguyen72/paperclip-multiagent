@@ -1,6 +1,6 @@
 {
-  "id": "809726a1-762c-4c9d-a7fd-55670f1c856f",
-  "prevId": "fb4383f6-cbe6-4aff-9fd2-6eeb69a6927a",
+  "id": "f5e0cd0d-9a05-4850-baa8-d02ee0a33d12",
+  "prevId": "cbbc531a-72ce-4bff-8705-04e02dc60df5",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -712,6 +712,12 @@
           "primaryKey": false,
           "notNull": true,
           "default": "'{}'::jsonb"
+        },
+        "previous_usage_json": {
+          "name": "previous_usage_json",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
         },
         "reason": {
           "name": "reason",
@@ -3061,6 +3067,119 @@
         "agent_memberships_agent_id_agents_id_fk": {
           "name": "agent_memberships_agent_id_agents_id_fk",
           "tableFrom": "agent_memberships",
+          "tableTo": "agents",
+          "columnsFrom": [
+            "agent_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.agent_model_fallback_states": {
+      "name": "agent_model_fallback_states",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "company_id": {
+          "name": "company_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "agent_id": {
+          "name": "agent_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "active_connection_id": {
+          "name": "active_connection_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "pinned_issue_ids": {
+          "name": "pinned_issue_ids",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'[]'::jsonb"
+        },
+        "switched_at": {
+          "name": "switched_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "reason": {
+          "name": "reason",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "agent_model_fallback_states_company_agent_uq": {
+          "name": "agent_model_fallback_states_company_agent_uq",
+          "columns": [
+            {
+              "expression": "company_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "agent_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "agent_model_fallback_states_company_id_companies_id_fk": {
+          "name": "agent_model_fallback_states_company_id_companies_id_fk",
+          "tableFrom": "agent_model_fallback_states",
+          "tableTo": "companies",
+          "columnsFrom": [
+            "company_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "agent_model_fallback_states_agent_id_agents_id_fk": {
+          "name": "agent_model_fallback_states_agent_id_agents_id_fk",
+          "tableFrom": "agent_model_fallback_states",
           "tableTo": "agents",
           "columnsFrom": [
             "agent_id"
@@ -7171,6 +7290,147 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
+    "public.budget_evaluation_work": {
+      "name": "budget_evaluation_work",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "company_id": {
+          "name": "company_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "agent_id": {
+          "name": "agent_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "project_id": {
+          "name": "project_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "budget_evaluation_work_company_pending_idx": {
+          "name": "budget_evaluation_work_company_pending_idx",
+          "columns": [
+            {
+              "expression": "company_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "created_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "budget_evaluation_work_agent_pending_idx": {
+          "name": "budget_evaluation_work_agent_pending_idx",
+          "columns": [
+            {
+              "expression": "company_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "agent_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "created_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "budget_evaluation_work_project_pending_idx": {
+          "name": "budget_evaluation_work_project_pending_idx",
+          "columns": [
+            {
+              "expression": "company_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "project_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "created_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "budget_evaluation_work_company_id_companies_id_fk": {
+          "name": "budget_evaluation_work_company_id_companies_id_fk",
+          "tableFrom": "budget_evaluation_work",
+          "tableTo": "companies",
+          "columnsFrom": [
+            "company_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
     "public.budget_incidents": {
       "name": "budget_incidents",
       "schema": "",
@@ -7513,6 +7773,13 @@
         },
         "enforcement_delivered_version": {
           "name": "enforcement_delivered_version",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "evaluation_version": {
+          "name": "evaluation_version",
           "type": "integer",
           "primaryKey": false,
           "notNull": true,
@@ -21885,6 +22152,12 @@
           "primaryKey": false,
           "notNull": false
         },
+        "reported_usage_json": {
+          "name": "reported_usage_json",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
         "pricing_provenance": {
           "name": "pricing_provenance",
           "type": "jsonb",
@@ -33805,6 +34078,390 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
+    "public.heartbeat_run_change_files": {
+      "name": "heartbeat_run_change_files",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "run_change_id": {
+          "name": "run_change_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "path": {
+          "name": "path",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "patch": {
+          "name": "patch",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "heartbeat_run_change_files_run_change_path_idx": {
+          "name": "heartbeat_run_change_files_run_change_path_idx",
+          "columns": [
+            {
+              "expression": "run_change_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "path",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "heartbeat_run_change_files_run_change_id_heartbeat_run_changes_id_fk": {
+          "name": "heartbeat_run_change_files_run_change_id_heartbeat_run_changes_id_fk",
+          "tableFrom": "heartbeat_run_change_files",
+          "tableTo": "heartbeat_run_changes",
+          "columnsFrom": [
+            "run_change_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.heartbeat_run_changes": {
+      "name": "heartbeat_run_changes",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "company_id": {
+          "name": "company_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "run_id": {
+          "name": "run_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "issue_id": {
+          "name": "issue_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "agent_id": {
+          "name": "agent_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "execution_workspace_id": {
+          "name": "execution_workspace_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "cwd": {
+          "name": "cwd",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "reason": {
+          "name": "reason",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "start_head": {
+          "name": "start_head",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "start_tree": {
+          "name": "start_tree",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "start_branch": {
+          "name": "start_branch",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "end_head": {
+          "name": "end_head",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "end_tree": {
+          "name": "end_tree",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "end_branch": {
+          "name": "end_branch",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "additions": {
+          "name": "additions",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "deletions": {
+          "name": "deletions",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "files": {
+          "name": "files",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'[]'::jsonb"
+        },
+        "commands": {
+          "name": "commands",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'[]'::jsonb"
+        },
+        "overlapping_run_ids": {
+          "name": "overlapping_run_ids",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'[]'::jsonb"
+        },
+        "start_snapshots": {
+          "name": "start_snapshots",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'{}'::jsonb"
+        },
+        "end_snapshots": {
+          "name": "end_snapshots",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'{}'::jsonb"
+        },
+        "started_at": {
+          "name": "started_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "finalized_at": {
+          "name": "finalized_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "heartbeat_run_changes_run_idx": {
+          "name": "heartbeat_run_changes_run_idx",
+          "columns": [
+            {
+              "expression": "run_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "heartbeat_run_changes_company_issue_created_idx": {
+          "name": "heartbeat_run_changes_company_issue_created_idx",
+          "columns": [
+            {
+              "expression": "company_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "issue_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "created_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "heartbeat_run_changes_workspace_status_idx": {
+          "name": "heartbeat_run_changes_workspace_status_idx",
+          "columns": [
+            {
+              "expression": "execution_workspace_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "status",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "heartbeat_run_changes_company_id_companies_id_fk": {
+          "name": "heartbeat_run_changes_company_id_companies_id_fk",
+          "tableFrom": "heartbeat_run_changes",
+          "tableTo": "companies",
+          "columnsFrom": [
+            "company_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "heartbeat_run_changes_run_id_heartbeat_runs_id_fk": {
+          "name": "heartbeat_run_changes_run_id_heartbeat_runs_id_fk",
+          "tableFrom": "heartbeat_run_changes",
+          "tableTo": "heartbeat_runs",
+          "columnsFrom": [
+            "run_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "heartbeat_run_changes_issue_id_issues_id_fk": {
+          "name": "heartbeat_run_changes_issue_id_issues_id_fk",
+          "tableFrom": "heartbeat_run_changes",
+          "tableTo": "issues",
+          "columnsFrom": [
+            "issue_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        },
+        "heartbeat_run_changes_agent_id_agents_id_fk": {
+          "name": "heartbeat_run_changes_agent_id_agents_id_fk",
+          "tableFrom": "heartbeat_run_changes",
+          "tableTo": "agents",
+          "columnsFrom": [
+            "agent_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "heartbeat_run_changes_execution_workspace_id_execution_workspaces_id_fk": {
+          "name": "heartbeat_run_changes_execution_workspace_id_execution_workspaces_id_fk",
+          "tableFrom": "heartbeat_run_changes",
+          "tableTo": "execution_workspaces",
+          "columnsFrom": [
+            "execution_workspace_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
     "public.heartbeat_run_events": {
       "name": "heartbeat_run_events",
       "schema": "",
@@ -44024,6 +44681,112 @@
           "value": "(\"managed_agent_profiles\".\"qualified_at\" IS NULL AND \"managed_agent_profiles\".\"qualified_revision\" IS NULL) OR (\"managed_agent_profiles\".\"qualified_at\" IS NOT NULL AND \"managed_agent_profiles\".\"qualification\" <> '{}'::jsonb AND \"managed_agent_profiles\".\"qualified_revision\" ~ '^sha256:[0-9a-f]{64}$')"
         }
       },
+      "isRLSEnabled": false
+    },
+    "public.model_account_exhaustions": {
+      "name": "model_account_exhaustions",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "company_id": {
+          "name": "company_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "account_key": {
+          "name": "account_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "exhausted_until": {
+          "name": "exhausted_until",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "source_run_id": {
+          "name": "source_run_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "parsed_reset_time": {
+          "name": "parsed_reset_time",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "model_account_exhaustions_company_account_uq": {
+          "name": "model_account_exhaustions_company_account_uq",
+          "columns": [
+            {
+              "expression": "company_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "account_key",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "model_account_exhaustions_company_id_companies_id_fk": {
+          "name": "model_account_exhaustions_company_id_companies_id_fk",
+          "tableFrom": "model_account_exhaustions",
+          "tableTo": "companies",
+          "columnsFrom": [
+            "company_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "model_account_exhaustions_source_run_id_heartbeat_runs_id_fk": {
+          "name": "model_account_exhaustions_source_run_id_heartbeat_runs_id_fk",
+          "tableFrom": "model_account_exhaustions",
+          "tableTo": "heartbeat_runs",
+          "columnsFrom": [
+            "source_run_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
       "isRLSEnabled": false
     },
     "public.native_harness_backups": {

@@ -1,15 +1,16 @@
 import { existsSync } from "node:fs";
+import path from "node:path";
 import {
   agents, heartbeatRunChangeFiles, heartbeatRunChanges, heartbeatRuns, type Db,
 } from "@paperclipai/db";
-import type { IssueRunChangesEntry, RunChangeFilePatch, RunChangeStatus } from "@paperclipai/shared";
+import type { IssueRunChangesEntry, RunChangeFile, RunChangeFilePatch, RunChangeStatus } from "@paperclipai/shared";
 import { and, desc, eq, inArray, ne } from "drizzle-orm";
 import { logger } from "../../middleware/logger.js";
 import { redactSensitiveText } from "../../redaction.js";
 import { HEARTBEAT_RUN_TERMINAL_STATUSES } from "../heartbeat/recovery.js";
 import { getRunLogStore, isRunLogStoreType } from "../run-log-store.js";
 import { extractRunCommands } from "./commands.js";
-import { captureSnapshot, diffSnapshots, type Snapshot } from "./git-snapshot.js";
+import { captureWorkspaceSnapshots, diffSnapshots, type Snapshot } from "./git-snapshot.js";
 
 type RunChangeRow = typeof heartbeatRunChanges.$inferSelect;
 type RunRow = typeof heartbeatRuns.$inferSelect;
@@ -43,8 +44,43 @@ async function readRunLogFromStore(run: Pick<RunRow, "logStore" | "logRef">): Pr
   return content;
 }
 
-function startSnapshotOf(row: RunChangeRow): Snapshot | null {
-  return row.startTree ? { head: row.startHead, tree: row.startTree, branch: row.startBranch } : null;
+type Repos = Record<string, Snapshot>;
+
+function startReposOf(row: RunChangeRow): Repos {
+  if (Object.keys(row.startSnapshots).length > 0) return row.startSnapshots;
+  return row.startTree ? { ".": { head: row.startHead, tree: row.startTree, branch: row.startBranch } } : {};
+}
+
+function newReposOf(row: RunChangeRow): string[] {
+  if (Object.keys(row.endSnapshots).length === 0) return [];
+  const start = startReposOf(row);
+  return Object.keys(row.endSnapshots).filter((key) => !(key in start)).sort();
+}
+
+function branchChangedOf(row: RunChangeRow): boolean {
+  const start = startReposOf(row);
+  const end = Object.keys(row.endSnapshots).length > 0 ? row.endSnapshots
+    : row.endTree ? { ".": { head: row.endHead, tree: row.endTree, branch: row.endBranch } } : {};
+  return Object.entries(end).some(([key, snapshot]) => key in start && snapshot.branch !== null && start[key]!.branch !== snapshot.branch);
+}
+
+/** Diffs every repository present at both ends; nested repositories get their directory as path prefix. */
+async function diffRepos(cwd: string, start: Repos, end: Repos) {
+  const files: RunChangeFile[] = [];
+  const patches = new Map<string, string | null>();
+  let additions = 0;
+  let deletions = 0;
+  for (const key of Object.keys(end).sort()) {
+    const before = start[key];
+    if (!before) continue;
+    const prefix = key === "." ? "" : `${key}/`;
+    const diff = await diffSnapshots(key === "." ? cwd : path.join(cwd, key), before, end[key]!, redactSensitiveText);
+    additions += diff.additions;
+    deletions += diff.deletions;
+    for (const file of diff.files) files.push({ ...file, path: prefix + file.path, oldPath: file.oldPath ? prefix + file.oldPath : null });
+    for (const [filePath, patch] of diff.patches) patches.set(prefix + filePath, patch);
+  }
+  return { files, patches, additions, deletions };
 }
 
 export function createRunChangesService(db: Db, deps: RunChangesDependencies = {}) {
@@ -61,10 +97,11 @@ export function createRunChangesService(db: Db, deps: RunChangesDependencies = {
   }
 
   /** Diff a pending row against an end snapshot and persist it. Only the first writer wins. */
-  async function finalizeWith(row: RunChangeRow, end: Snapshot, extraOverlap: string[] = []) {
-    const start = startSnapshotOf(row);
-    if (!start || !row.cwd) return closeWithStatus(row.id, "failed", "missing_start_snapshot");
-    const diff = await diffSnapshots(row.cwd, start, end, redactSensitiveText);
+  async function finalizeWith(row: RunChangeRow, end: Repos, extraOverlap: string[] = []) {
+    const start = startReposOf(row);
+    if (Object.keys(start).length === 0 || !row.cwd) return closeWithStatus(row.id, "failed", "missing_start_snapshot");
+    const diff = await diffRepos(row.cwd, start, end);
+    const single = end["."];
     const run = await loadRun(row.runId);
     let commands: ReturnType<typeof extractRunCommands> = [];
     if (run) {
@@ -79,9 +116,10 @@ export function createRunChangesService(db: Db, deps: RunChangesDependencies = {
       const updated = await tx.update(heartbeatRunChanges).set({
         status: diff.files.length > 0 ? "captured" : "no_changes",
         reason: null,
-        endHead: end.head,
-        endTree: end.tree,
-        endBranch: end.branch,
+        endHead: single?.head ?? null,
+        endTree: single?.tree ?? null,
+        endBranch: single?.branch ?? null,
+        endSnapshots: end,
         additions: diff.additions,
         deletions: diff.deletions,
         files: diff.files,
@@ -99,9 +137,9 @@ export function createRunChangesService(db: Db, deps: RunChangesDependencies = {
   async function finalizeRow(row: RunChangeRow) {
     if (row.status !== "pending") return;
     if (!row.cwd || !existsSync(row.cwd)) return closeWithStatus(row.id, "incomplete", "workspace_missing");
-    const end = await captureSnapshot(row.cwd);
+    const end = await captureWorkspaceSnapshots(row.cwd);
     if (!end.ok) return closeWithStatus(row.id, end.reason === "not_git" ? "incomplete" : "failed", end.reason);
-    await finalizeWith(row, end.snapshot);
+    await finalizeWith(row, end.repos);
   }
 
   async function recordRunStart(input: RecordRunStartInput): Promise<void> {
@@ -121,7 +159,7 @@ export function createRunChangesService(db: Db, deps: RunChangesDependencies = {
       || (input.persistedExecutionWorkspace !== null && input.persistedExecutionWorkspace.providerType !== "local_fs");
     if (remote) return void (await insert({ status: "skipped", reason: "remote" }));
 
-    const snapshot = await captureSnapshot(input.executionWorkspace.cwd);
+    const snapshot = await captureWorkspaceSnapshots(input.executionWorkspace.cwd);
     if (!snapshot.ok) {
       const status: RunChangeStatus = snapshot.reason === "error" ? "failed" : "skipped";
       return void (await insert({ status, reason: snapshot.reason }));
@@ -141,14 +179,16 @@ export function createRunChangesService(db: Db, deps: RunChangesDependencies = {
       const run = await loadRun(row.runId);
       const stillRunning = run !== undefined && !TERMINAL.has(run.status);
       if (stillRunning) overlapping.push(row.runId);
-      await finalizeWith(row, snapshot.snapshot, stillRunning ? [input.run.id] : []);
+      await finalizeWith(row, snapshot.repos, stillRunning ? [input.run.id] : []);
     }
 
+    const single = snapshot.repos["."];
     await insert({
       status: "pending",
-      startHead: snapshot.snapshot.head,
-      startTree: snapshot.snapshot.tree,
-      startBranch: snapshot.snapshot.branch,
+      startHead: single?.head ?? null,
+      startTree: single?.tree ?? null,
+      startBranch: single?.branch ?? null,
+      startSnapshots: snapshot.repos,
       overlappingRunIds: overlapping,
     });
   }
@@ -203,7 +243,8 @@ export function createRunChangesService(db: Db, deps: RunChangesDependencies = {
       files: change.files,
       commands: change.commands,
       overlappingRunIds: change.overlappingRunIds,
-      branchChanged: change.endBranch !== null && change.startBranch !== change.endBranch,
+      branchChanged: branchChangedOf(change),
+      newRepos: newReposOf(change),
     }));
   }
 

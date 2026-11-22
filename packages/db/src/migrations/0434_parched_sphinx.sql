@@ -1,0 +1,2 @@
+ALTER TABLE "heartbeat_run_changes" ADD COLUMN "start_snapshots" jsonb DEFAULT '{}'::jsonb NOT NULL;--> statement-breakpoint
+ALTER TABLE "heartbeat_run_changes" ADD COLUMN "end_snapshots" jsonb DEFAULT '{}'::jsonb NOT NULL;

@@ -179,6 +179,38 @@ describePostgres("run changes service", () => {
     expect((await s.row(running.id))?.status).toBe("pending");
   });
 
+  it("captures changes in repositories nested in the workspace with the directory as path prefix", async () => {
+    const s = await seed();
+    const workspace = mkdtempSync(path.join(tmpdir(), "run-changes-nested-"));
+    dirs.push(workspace);
+    const nested = gitRepo();
+    execFileSync("git", ["clone", "-q", nested, path.join(workspace, "wt57")]);
+    const run = await s.newRun();
+    await s.start(run, { cwd: workspace });
+    expect((await s.row(run.id))?.status).toBe("pending");
+    writeFileSync(path.join(workspace, "wt57", "app.ts"), "export const a = 57;\n");
+    await s.finish(run.id);
+    await service().finalizeRun(run.id);
+    const row = (await s.row(run.id))!;
+    expect(row.status).toBe("captured");
+    expect(row.files.map((file) => file.path)).toEqual(["wt57/app.ts"]);
+    expect((await service().getFilePatch(s.companyId, run.id, "wt57/app.ts", s.issueId))?.patch).toContain("+export const a = 57;");
+  });
+
+  it("notes repositories created during the run instead of listing their checkout", async () => {
+    const s = await seed();
+    const workspace = mkdtempSync(path.join(tmpdir(), "run-changes-clone-"));
+    dirs.push(workspace);
+    execFileSync("git", ["clone", "-q", gitRepo(), path.join(workspace, "repo")]);
+    const run = await s.newRun();
+    await s.start(run, { cwd: workspace });
+    execFileSync("git", ["clone", "-q", gitRepo(), path.join(workspace, "wt61")]);
+    await s.finish(run.id);
+    await service().finalizeRun(run.id);
+    const [entry] = await service().listForIssue(s.companyId, s.issueId);
+    expect(entry).toMatchObject({ status: "no_changes", newRepos: ["wt61"], files: [] });
+  });
+
   it("listForIssue returns newest first with agent names and totals and only that issue's runs", async () => {
     const s = await seed();
     const older = await s.newRun();

@@ -19,6 +19,12 @@ export interface RunChangeFile {
   collapsedByDefault: boolean;
 }
 
+export interface RunChangeSnapshot {
+  head: string | null;
+  tree: string;
+  branch: string | null;
+}
+
 export interface RunChangeCommand {
   ts: string | null;
   tool: string;
@@ -40,6 +46,8 @@ export interface IssueRunChangesEntry {
   commands: RunChangeCommand[];
   overlappingRunIds: string[];
   branchChanged: boolean;
+  /** Repositories that appeared during the run; their initial checkout is not listed as changes. */
+  newRepos: string[];
 }
 
 export interface RunChangeFilePatch {

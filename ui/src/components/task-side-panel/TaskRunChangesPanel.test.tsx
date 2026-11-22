@@ -34,7 +34,7 @@ const run = (runId: string, over: Partial<IssueRunChangesEntry> = {}): IssueRunC
   runId, agentId: "a1", agentName: "FE", runStatus: "succeeded", startedAt: "2026-11-19T07:32:00.000Z", finishedAt: "2026-11-19T07:40:00.000Z",
   status: "captured", reason: null, additions: 2, deletions: 1, files: [file("src/pages/StudentBookings.tsx")],
   commands: [{ ts: null, tool: "Terminal", text: "npm test" }, { ts: null, tool: "Terminal", text: "git status" }],
-  overlappingRunIds: [], branchChanged: false, ...over,
+  overlappingRunIds: [], branchChanged: false, newRepos: [], ...over,
 });
 
 describe("TaskRunChangesPanel", () => {
@@ -108,6 +108,12 @@ describe("TaskRunChangesPanel", () => {
     expect(container.textContent).toContain("2 runs outside a git workspace");
     expect(container.querySelectorAll("[data-run-id]")).toHaveLength(1);
     expect(container.textContent).toContain("snapshot timed out");
+  });
+
+  it("notes repositories created during the run", async () => {
+    mocks.list.mockResolvedValue([run("r1", { newRepos: ["wt61"] })]);
+    await render();
+    expect(container.textContent).toContain("wt61 was created during this run");
   });
 
   it("warns when another run overlapped or the branch changed", async () => {

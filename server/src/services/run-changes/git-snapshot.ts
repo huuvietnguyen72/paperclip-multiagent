@@ -1,6 +1,7 @@
 import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { rm } from "node:fs/promises";
+import { existsSync, type Dirent } from "node:fs";
+import { readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { RUN_CHANGES_LIMITS, type RunChangeFile, type RunChangeFileStatus } from "@paperclipai/shared";
@@ -80,6 +81,42 @@ export async function captureSnapshot(cwd: string, opts: { timeoutMs?: number } 
   } finally {
     await rm(indexFile, { force: true }).catch(() => undefined);
   }
+}
+
+export type WorkspaceSnapshotsResult =
+  | { ok: true; repos: Record<string, Snapshot> }
+  | { ok: false; reason: "not_git" | "timeout" | "error"; detail?: string };
+
+const MAX_NESTED_REPOS = 20;
+
+/**
+ * Agents often keep their checkouts inside the run workspace instead of making
+ * the workspace itself a repository (e.g. `repo/`, `wt56/`, one worktree per
+ * task). Snapshot the workspace when it is a repository ("."), otherwise every
+ * repository or worktree one level down, keyed by its directory name.
+ */
+export async function captureWorkspaceSnapshots(cwd: string, opts: { timeoutMs?: number } = {}): Promise<WorkspaceSnapshotsResult> {
+  const own = await captureSnapshot(cwd, opts);
+  if (own.ok) return { ok: true, repos: { ".": own.snapshot } };
+  if (own.reason !== "not_git") return own;
+  let entries: Dirent[];
+  try {
+    entries = await readdir(cwd, { withFileTypes: true });
+  } catch {
+    return { ok: false, reason: "not_git" };
+  }
+  const candidates = entries
+    .filter((entry) => entry.isDirectory() && existsSync(path.join(cwd, entry.name, ".git")))
+    .map((entry) => entry.name)
+    .sort()
+    .slice(0, MAX_NESTED_REPOS);
+  const repos: Record<string, Snapshot> = {};
+  for (const name of candidates) {
+    const result = await captureSnapshot(path.join(cwd, name), opts);
+    if (result.ok) repos[name] = result.snapshot;
+    else if (result.reason === "timeout") return { ok: false, reason: "timeout" };
+  }
+  return Object.keys(repos).length > 0 ? { ok: true, repos } : { ok: false, reason: "not_git" };
 }
 
 export function isCollapsedByDefault(filePath: string, patchHead: string): boolean {

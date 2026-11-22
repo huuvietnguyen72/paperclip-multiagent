@@ -8,7 +8,7 @@ import {
   uniqueIndex,
   uuid,
 } from "drizzle-orm/pg-core";
-import type { RunChangeCommand, RunChangeFile } from "@paperclipai/shared";
+import type { RunChangeCommand, RunChangeFile, RunChangeSnapshot } from "@paperclipai/shared";
 import { agents } from "./agents.js";
 import { companies } from "./companies.js";
 import { executionWorkspaces } from "./execution_workspaces.js";
@@ -40,6 +40,9 @@ export const heartbeatRunChanges = pgTable(
     files: jsonb("files").$type<RunChangeFile[]>().notNull().default([]),
     commands: jsonb("commands").$type<RunChangeCommand[]>().notNull().default([]),
     overlappingRunIds: jsonb("overlapping_run_ids").$type<string[]>().notNull().default([]),
+    /** Per-repository snapshots keyed by directory ("." = the workspace itself). */
+    startSnapshots: jsonb("start_snapshots").$type<Record<string, RunChangeSnapshot>>().notNull().default({}),
+    endSnapshots: jsonb("end_snapshots").$type<Record<string, RunChangeSnapshot>>().notNull().default({}),
     startedAt: timestamp("started_at", { withTimezone: true }).notNull().defaultNow(),
     finalizedAt: timestamp("finalized_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),

@@ -126,6 +126,11 @@ function RunSection({ issueId, entry, defaultOpen }: { issueId: string; entry: I
         <Totals additions={entry.additions} deletions={entry.deletions} />
       </button>
       {reason ? <p className="border-t border-border px-3 py-1.5 text-xs text-muted-foreground">{reason}</p> : null}
+      {entry.newRepos.length > 0 ? (
+        <p className="border-t border-border px-3 py-1.5 text-xs text-muted-foreground">
+          {entry.newRepos.join(", ")} {entry.newRepos.length === 1 ? "was" : "were"} created during this run; the initial checkout is not listed. Later runs show changes inside it.
+        </p>
+      ) : null}
       {open ? (
         <div className="space-y-2 border-t border-border px-3 py-2">
           {entry.overlappingRunIds.length > 0 ? (

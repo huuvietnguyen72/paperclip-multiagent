@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { RUN_CHANGES_LIMITS } from "@paperclipai/shared";
-import { captureSnapshot, diffSnapshots, isCollapsedByDefault, type Snapshot } from "./git-snapshot.js";
+import { captureSnapshot, captureWorkspaceSnapshots, diffSnapshots, isCollapsedByDefault, type Snapshot } from "./git-snapshot.js";
 
 const dirs: string[] = [];
 afterEach(() => { for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true }); });
@@ -164,5 +164,38 @@ describe("git snapshots", () => {
     const dir = repo();
     const result = await captureSnapshot(dir, { timeoutMs: 1 });
     expect(result).toMatchObject({ ok: false, reason: "timeout" });
+  });
+});
+
+describe("workspace snapshots", () => {
+  it("snapshots the workspace itself when it is a git repository", async () => {
+    const dir = repo();
+    const result = await captureWorkspaceSnapshots(dir);
+    expect(result.ok && Object.keys(result.repos)).toEqual(["."]);
+  });
+
+  it("finds git repositories and worktrees one level down when the workspace is not a repository", async () => {
+    const workspace = mkdtempSync(path.join(tmpdir(), "run-changes-ws-"));
+    dirs.push(workspace);
+    const main = path.join(workspace, "repo");
+    mkdirSync(main);
+    git(main, "init", "-q", "-b", "main");
+    git(main, "config", "user.email", "t@example.test");
+    git(main, "config", "user.name", "T");
+    writeFileSync(path.join(main, "app.ts"), "a\n");
+    git(main, "add", "-A");
+    git(main, "commit", "-q", "-m", "init");
+    git(main, "worktree", "add", "-q", "-b", "feat/x", path.join(workspace, "wt57"));
+    mkdirSync(path.join(workspace, ".claude"));
+    const result = await captureWorkspaceSnapshots(workspace);
+    expect(result.ok && Object.keys(result.repos).sort()).toEqual(["repo", "wt57"]);
+    expect(result.ok && result.repos.wt57!.branch).toBe("feat/x");
+  });
+
+  it("returns not_git when no repository is found", async () => {
+    const workspace = mkdtempSync(path.join(tmpdir(), "run-changes-empty-"));
+    dirs.push(workspace);
+    mkdirSync(path.join(workspace, ".claude"));
+    expect(await captureWorkspaceSnapshots(workspace)).toEqual({ ok: false, reason: "not_git" });
   });
 });
