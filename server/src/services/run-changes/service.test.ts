@@ -151,18 +151,37 @@ describePostgres("run changes service", () => {
     expect(await s.row(run.id)).toMatchObject({ status: "incomplete" });
   });
 
-  it("a new run on the same workspace closes the previous pending capture and records overlap", async () => {
+  it("keeps a still-running capture open when another run starts on the same workspace and records the overlap", async () => {
     const s = await seed();
     const first = await s.newRun();
     await s.start(first);
     writeFileSync(path.join(s.cwd, "first.ts"), "1\n");
     const second = await s.newRun();
     await s.start(second);
+    expect((await s.row(first.id))?.status).toBe("pending");
+    expect((await s.row(first.id))?.overlappingRunIds).toEqual([second.id]);
+    expect((await s.row(second.id))?.overlappingRunIds).toEqual([first.id]);
+    writeFileSync(path.join(s.cwd, "later.ts"), "2\n");
+    await s.finish(first.id);
+    await service().finalizeRun(first.id);
+    const firstRow = (await s.row(first.id))!;
+    expect(firstRow.status).toBe("captured");
+    expect(firstRow.files.map((file) => file.path).sort()).toEqual(["first.ts", "later.ts"]);
+  });
+
+  it("closes a finished run's leftover capture when the next run starts on the same workspace", async () => {
+    const s = await seed();
+    const first = await s.newRun();
+    await s.start(first);
+    writeFileSync(path.join(s.cwd, "first.ts"), "1\n");
+    await s.finish(first.id);
+    const second = await s.newRun();
+    await s.start(second);
     const firstRow = (await s.row(first.id))!;
     expect(firstRow.status).toBe("captured");
     expect(firstRow.files.map((file) => file.path)).toEqual(["first.ts"]);
-    expect(firstRow.overlappingRunIds).toEqual([second.id]);
-    expect((await s.row(second.id))?.overlappingRunIds).toEqual([first.id]);
+    expect(firstRow.overlappingRunIds).toEqual([]);
+    expect((await s.row(second.id))?.overlappingRunIds).toEqual([]);
   });
 
   it("finalizePending only finalizes rows whose run is terminal", async () => {

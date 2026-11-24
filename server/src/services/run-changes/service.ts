@@ -178,8 +178,17 @@ export function createRunChangesService(db: Db, deps: RunChangesDependencies = {
     for (const row of open) {
       const run = await loadRun(row.runId);
       const stillRunning = run !== undefined && !TERMINAL.has(run.status);
-      if (stillRunning) overlapping.push(row.runId);
-      await finalizeWith(row, snapshot.repos, stillRunning ? [input.run.id] : []);
+      if (stillRunning) {
+        // The other run is still working: keep its capture open (its own end is taken when it
+        // finishes) and mark both runs as overlapping, since their diffs may include each other.
+        overlapping.push(row.runId);
+        await db.update(heartbeatRunChanges)
+          .set({ overlappingRunIds: [...new Set([...row.overlappingRunIds, input.run.id])], updatedAt: new Date() })
+          .where(eq(heartbeatRunChanges.id, row.id));
+      } else {
+        // A finished run whose capture was never closed: this run's start is its end.
+        await finalizeWith(row, snapshot.repos);
+      }
     }
 
     const single = snapshot.repos["."];
