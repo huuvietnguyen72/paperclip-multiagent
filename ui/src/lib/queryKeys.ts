@@ -527,6 +527,11 @@ export const queryKeys = {
       ] as const,
     detail: (id: string) => ["projects", "detail", id] as const,
     accessMembers: (id: string) => ["projects", "access-members", id] as const,
+    codeView: (projectId: string) => ["projects", "code-view", projectId] as const,
+    codeFiles: (projectId: string, workspaceId: string, query: Record<string, unknown> = {}) =>
+      ["projects", "code-files", projectId, workspaceId, "list", query] as const,
+    codeFile: (projectId: string, workspaceId: string, path: string, kind: "resolve" | "content") =>
+      ["projects", "code-files", projectId, workspaceId, kind, path] as const,
   },
   cases: {
     handoffs: (id: string) => ["cases", "handoffs", id] as const,

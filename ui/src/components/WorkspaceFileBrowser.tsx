@@ -1,4 +1,5 @@
 import {
+  useCallback,
   useEffect,
   useId,
   useMemo,
@@ -12,7 +13,8 @@ import { AlertTriangle, ChevronDown, ChevronRight, Cloud, Download, FileCode2, F
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { cn, formatDateTime } from "@/lib/utils";
-import { fileResourcesApi } from "@/api/file-resources";
+import { fileResourcesApi, type FileResourceListQuery } from "@/api/file-resources";
+import { projectCodeViewApi } from "@/api/project-code-view";
 import { projectsApi } from "@/api/projects";
 import { ApiError } from "@/api/client";
 import { describeError } from "@/api/errors";
@@ -461,8 +463,15 @@ function WorkspaceFileTree({
   );
 }
 
+/** Where the files come from: a task's workspaces, or one project workspace (project "Code" tab). */
+export type WorkspaceFileBrowserScope =
+  | { kind: "issue"; issueId: string }
+  | { kind: "project"; projectId: string; workspaceId: string };
+
 export interface WorkspaceFileBrowserProps {
-  issueId: string;
+  /** Task whose workspaces are browsed. Ignored when `scope` is a project scope. */
+  issueId?: string;
+  scope?: WorkspaceFileBrowserScope;
   companyId?: string | null;
   onOpen: (ref: {
     path: string;
@@ -496,7 +505,8 @@ export interface WorkspaceFileBrowserProps {
 }
 
 export function WorkspaceFileBrowser({
-  issueId,
+  issueId: issueIdProp,
+  scope,
   companyId,
   onOpen,
   onBrowseStateChange,
@@ -513,8 +523,11 @@ export function WorkspaceFileBrowser({
 }: WorkspaceFileBrowserProps) {
   const queryClient = useQueryClient();
   const { visible: pageVisible } = usePageVisibility();
+  const projectScope = scope?.kind === "project" ? scope : null;
+  const issueId = scope?.kind === "issue" ? scope.issueId : (issueIdProp ?? "");
+  // A project scope always browses its one workspace; the project picker is a task-only feature.
   const source: BrowserSource =
-    initialProjectId && initialWorkspaceId ? "other" : "current";
+    !projectScope && initialProjectId && initialWorkspaceId ? "other" : "current";
   const workspace: WorkspaceFileSelector = "auto";
   const selectedParentPath = useMemo(() => parentFolderPath(selectedPath), [selectedPath]);
   const effectiveInitialFolderPath = useMemo(() => {
@@ -608,7 +621,10 @@ export function WorkspaceFileBrowser({
 
   const q = debouncedQuery || null;
   const isSearch = q !== null;
-  const mode: WorkspaceFileListMode = folderPath || isSearch || selectedPath ? "all" : recentUnavailable ? "all" : "changed";
+  // A project scope is a plain code browser: always the full tree, never "recently changed".
+  const mode: WorkspaceFileListMode = projectScope || folderPath || isSearch || selectedPath
+    ? "all"
+    : recentUnavailable ? "all" : "changed";
   const targetProjectId = source === "other" ? selectedProjectId : null;
   const targetWorkspaceId = source === "other" ? selectedWorkspaceId : null;
   const effectiveWorkspace: WorkspaceFileSelector = source === "other" ? "project" : workspace;
@@ -635,7 +651,15 @@ export function WorkspaceFileBrowser({
     });
   }, [folderPath, liveBrowseQuery, targetProjectId, targetWorkspaceId]);
 
-  const listQueryKey = useMemo(() => queryKeys.issues.fileResources(issueId, {
+  const listKeyFor = useCallback((query: FileResourceListQuery) => projectScope
+    ? queryKeys.projects.codeFiles(projectScope.projectId, projectScope.workspaceId, { ...query })
+    : queryKeys.issues.fileResources(issueId, query), [issueId, projectScope]);
+  const fetchList = useCallback((query: FileResourceListQuery, signal?: AbortSignal) => projectScope
+    ? projectCodeViewApi.listFiles(projectScope.projectId, projectScope.workspaceId, {
+      path: query.path ?? null, q: query.q ?? null, mode: "all", limit: query.limit, offset: query.offset,
+    }, { signal })
+    : fileResourcesApi.list(issueId, query, { signal }), [issueId, projectScope]);
+  const listQueryKey = useMemo(() => listKeyFor({
       workspace: effectiveWorkspace,
       projectId: targetProjectId,
       workspaceId: targetWorkspaceId,
@@ -644,10 +668,10 @@ export function WorkspaceFileBrowser({
       limit: LIST_LIMIT,
       offset: 0,
       path: folderPath,
-    }), [effectiveWorkspace, folderPath, issueId, mode, q, targetProjectId, targetWorkspaceId]);
+    }), [effectiveWorkspace, folderPath, listKeyFor, mode, q, targetProjectId, targetWorkspaceId]);
   const listQuery = useQuery({
     queryKey: listQueryKey,
-    queryFn: ({ signal }) => fileResourcesApi.list(issueId, {
+    queryFn: ({ signal }) => fetchList({
       workspace: effectiveWorkspace,
       projectId: targetProjectId,
       workspaceId: targetWorkspaceId,
@@ -656,7 +680,7 @@ export function WorkspaceFileBrowser({
       limit: LIST_LIMIT,
       offset: 0,
       path: folderPath,
-    }, { signal }),
+    }, signal),
     enabled: queriesEnabled,
     staleTime: 15_000,
     refetchOnWindowFocus: false,
@@ -666,9 +690,11 @@ export function WorkspaceFileBrowser({
   useEffect(() => {
     if (active && pageVisible) return;
     void queryClient.cancelQueries({
-      queryKey: ["issues", "file-resources", issueId, "list"],
+      queryKey: projectScope
+        ? ["projects", "code-files", projectScope.projectId, projectScope.workspaceId, "list"]
+        : ["issues", "file-resources", issueId, "list"],
     });
-  }, [active, issueId, pageVisible, queryClient]);
+  }, [active, issueId, pageVisible, projectScope, queryClient]);
 
   const data = listQuery.data;
   const items = useMemo(() => data?.items ?? [], [data]);
@@ -703,7 +729,7 @@ export function WorkspaceFileBrowser({
   }, [canListFiles, currentFolderKey, folderPageCounts, isLazyBrowse, loadedLazyFolders]);
   const folderPageQueries = useQueries({
     queries: folderPageSpecs.map((spec) => ({
-      queryKey: queryKeys.issues.fileResources(issueId, {
+      queryKey: listKeyFor({
         workspace: effectiveWorkspace,
         projectId: targetProjectId,
         workspaceId: targetWorkspaceId,
@@ -713,7 +739,7 @@ export function WorkspaceFileBrowser({
         offset: spec.offset,
         path: spec.path || null,
       }),
-      queryFn: ({ signal }: { signal: AbortSignal }) => fileResourcesApi.list(issueId, {
+      queryFn: ({ signal }: { signal: AbortSignal }) => fetchList({
         workspace: effectiveWorkspace,
         projectId: targetProjectId,
         workspaceId: targetWorkspaceId,
@@ -722,7 +748,7 @@ export function WorkspaceFileBrowser({
         limit: LIST_LIMIT,
         offset: spec.offset,
         path: spec.path || null,
-      }, { signal }),
+      }, signal),
       enabled: queriesEnabled && isLazyBrowse,
       staleTime: 15_000,
       refetchOnWindowFocus: false,
@@ -974,6 +1000,7 @@ export function WorkspaceFileBrowser({
 
   function getDownloadUrl(item: WorkspaceFileListFileItem): string | null {
     if (!item.capabilities.download) return null;
+    if (projectScope) return projectCodeViewApi.downloadUrl(projectScope.projectId, projectScope.workspaceId, item.relativePath);
     const itemTarget = item.projectId
       ? { projectId: item.projectId, workspaceId: item.workspaceId }
       : targetRef;

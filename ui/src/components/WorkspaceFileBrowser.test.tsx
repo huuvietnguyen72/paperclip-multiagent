@@ -1012,3 +1012,63 @@ describe("describeUnavailable", () => {
     }
   });
 });
+
+describe("WorkspaceFileBrowser with a project scope", () => {
+  let container: HTMLDivElement;
+  const roots: Root[] = [];
+  const scope = { kind: "project" as const, projectId: "p1", workspaceId: "w1" };
+
+  beforeEach(() => {
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    useQueryMock.mockReset();
+    Object.defineProperty(document, "visibilityState", { configurable: true, value: "visible" });
+    Object.defineProperty(Element.prototype, "scrollIntoView", { configurable: true, value: vi.fn() });
+  });
+
+  afterEach(() => {
+    for (const root of roots.splice(0)) act(() => root.unmount());
+    container.remove();
+    vi.restoreAllMocks();
+  });
+
+  function render() {
+    const root = createRoot(container);
+    roots.push(root);
+    act(() => {
+      root.render(<WorkspaceFileBrowser scope={scope} onOpen={vi.fn()} />);
+    });
+  }
+
+  function projectListQueries() {
+    return useQueryMock.mock.calls
+      .map(([options]) => options as { queryKey?: readonly unknown[]; queryFn?: (ctx: { signal: AbortSignal }) => unknown })
+      .filter((options) => options.queryKey?.[0] === "projects" && options.queryKey?.[1] === "code-files");
+  }
+
+  it("lists the project workspace root in all mode through the project API", async () => {
+    const { projectCodeViewApi } = await import("@/api/project-code-view");
+    const { fileResourcesApi } = await import("@/api/file-resources");
+    const listFiles = vi.spyOn(projectCodeViewApi, "listFiles").mockResolvedValue(availableAllResponse([], null));
+    const issueList = vi.spyOn(fileResourcesApi, "list");
+    useQueryMock.mockReturnValue(ok(availableAllResponse([createDirectoryItem({ title: "apps", relativePath: "apps", displayPath: "apps/" })], null)));
+
+    render();
+
+    const query = projectListQueries().at(-1);
+    expect(query?.queryKey?.slice(0, 4)).toEqual(["projects", "code-files", "p1", "w1"]);
+    await query!.queryFn!({ signal: new AbortController().signal });
+    expect(listFiles).toHaveBeenCalledWith("p1", "w1", expect.objectContaining({ mode: "all", path: null }), expect.anything());
+    expect(issueList).not.toHaveBeenCalled();
+    expect(container.textContent).toContain("apps");
+  });
+
+  it("never asks for the changed-files view or the project picker", () => {
+    useQueryMock.mockReturnValue(ok(availableAllResponse([], null)));
+    render();
+    const keys = useQueryMock.mock.calls.map(([options]) => (options as { queryKey?: readonly unknown[] }).queryKey);
+    expect(keys.some((key) => key?.[0] === "issues")).toBe(false);
+    expect(keys.some((key) => key?.[0] === "projects" && key.length === 3 && key[2] && typeof key[2] === "object")).toBe(false);
+    expect(JSON.stringify(projectListQueries().map((options) => options.queryKey))).not.toContain("\"changed\"");
+  });
+});
