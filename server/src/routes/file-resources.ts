@@ -142,7 +142,7 @@ function limiterKey(companyId: string, actorId: string, issueId: string) {
   return `${companyId}:${actorId}:${issueId}`;
 }
 
-function requestAbortController(req: Request, res: Response) {
+export function requestAbortController(req: Request, res: Response) {
   const controller = new AbortController();
   const abort = () => controller.abort();
   const abortIfResponseIncomplete = () => {
@@ -159,15 +159,15 @@ function requestAbortController(req: Request, res: Response) {
   };
 }
 
-function parseBooleanQuery(value: unknown) {
+export function parseBooleanQuery(value: unknown) {
   return value === true || value === "true" || value === "1";
 }
 
-function safeAttachmentFilename(value: string) {
+export function safeAttachmentFilename(value: string) {
   return value.replaceAll("\"", "").replace(/[\\/\r\n]/g, "_") || "workspace-file";
 }
 
-function readQuery(query: unknown) {
+export function readQuery(query: unknown) {
   let parsed;
   try {
     parsed = workspaceFileResourceQuerySchema.parse(query);
@@ -190,7 +190,7 @@ function readQuery(query: unknown) {
   };
 }
 
-function readListQuery(query: unknown) {
+export function readListQuery(query: unknown) {
   let parsed;
   try {
     parsed = workspaceFileListQuerySchema.parse(query);
@@ -232,7 +232,7 @@ function readAvailabilityBody(body: unknown) {
   }
 }
 
-function activityDetails(input: {
+export function activityDetails(input: {
   outcome: "success" | "denied" | "unavailable";
   workspaceKind?: string | null;
   workspaceId?: string | null;
@@ -340,7 +340,7 @@ function safeAuditDisplayPath(query: unknown): string {
   return path;
 }
 
-function denialReasonFromError(error: unknown) {
+export function denialReasonFromError(error: unknown) {
   if (!(error instanceof HttpError)) return "unknown";
   const details = error.details;
   if (details && typeof details === "object" && "code" in details) {

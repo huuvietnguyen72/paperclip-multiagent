@@ -1063,6 +1063,17 @@ async function listChangedWorkspaceFiles(input: {
   };
 }
 
+export interface ProjectWorkspaceFileTarget {
+  companyId: string;
+  projectId: string;
+  workspaceId: string;
+}
+
+interface FileScope {
+  companyId: string;
+  issue: IssueRow | null;
+}
+
 export function workspaceFileResourceService(db: Db, actor?: AuthorizationActor, options: { remoteFiles?: RemoteWorkspaceFiles } = {}) {
   async function remoteAccess(candidate: WorkspaceCandidate, signal?: AbortSignal) {
     if (!options.remoteFiles || candidate.workspaceKind !== "execution_workspace") return null;
@@ -1150,7 +1161,7 @@ export function workspaceFileResourceService(db: Db, actor?: AuthorizationActor,
   }
 
   async function targetProjectWorkspaceCandidate(
-    issue: IssueRow,
+    companyId: string,
     target: WorkspaceTargetInput,
   ): Promise<WorkspaceCandidate | null> {
     const projectId = target.projectId ?? null;
@@ -1163,7 +1174,7 @@ export function workspaceFileResourceService(db: Db, actor?: AuthorizationActor,
     const [project] = await db.select().from(projects).where(eq(projects.id, projectId)).limit(1);
     const [workspace] = await db.select().from(projectWorkspaces).where(eq(projectWorkspaces.id, workspaceId)).limit(1);
     if (!project || !workspace) throw notFound("Project workspace not found");
-    if (project.companyId !== issue.companyId || workspace.companyId !== issue.companyId) {
+    if (project.companyId !== companyId || workspace.companyId !== companyId) {
       throw new HttpError(403, "Project workspace belongs to another company", { code: "cross_company_workspace" });
     }
     if (workspace.projectId !== project.id) {
@@ -1175,13 +1186,25 @@ export function workspaceFileResourceService(db: Db, actor?: AuthorizationActor,
     return candidate;
   }
 
+  /**
+   * Who the file request is for: a task (its workspaces are candidates), or a company with an explicit
+   * project workspace target and no task (the project "Code" tab).
+   */
+  async function fileScope(issueId: string, opts: { issue?: IssueRow; companyId?: string }): Promise<FileScope> {
+    if (opts.companyId && !opts.issue) return { companyId: opts.companyId, issue: null };
+    const issue = opts.issue ?? await getIssue(issueId);
+    return { companyId: issue.companyId, issue };
+  }
+
   async function listCandidates(
-    issue: IssueRow,
+    scope: FileScope,
     selector: WorkspaceFileSelector,
     target: WorkspaceTargetInput = {},
   ): Promise<WorkspaceCandidate[]> {
-    const explicitTarget = await targetProjectWorkspaceCandidate(issue, target);
+    const explicitTarget = await targetProjectWorkspaceCandidate(scope.companyId, target);
     if (explicitTarget) return [explicitTarget];
+    const issue = scope.issue;
+    if (!issue) return [];
 
     const candidates: WorkspaceCandidate[] = [];
     if (selector === "auto" || selector === "execution") {
@@ -1367,7 +1390,7 @@ export function workspaceFileResourceService(db: Db, actor?: AuthorizationActor,
     const selectorErrors = new Map<WorkspaceFileSelector, unknown>();
     for (const selector of new Set(untargetedQueries.map(item => item.query.workspace))) {
       try {
-        candidatesBySelector.set(selector, await listCandidates(issue, selector));
+        candidatesBySelector.set(selector, await listCandidates({ companyId: issue.companyId, issue }, selector));
       } catch (error) {
         if (!expectedAvailabilityReason(error)) throw error;
         selectorErrors.set(selector, error);
@@ -1491,13 +1514,14 @@ export function workspaceFileResourceService(db: Db, actor?: AuthorizationActor,
     workspace?: WorkspaceFileSelector | null;
     projectId?: string | null;
     workspaceId?: string | null;
-  }, opts: { issue?: IssueRow } = {}): Promise<ResolvedWorkspaceResource> {
-    const issue = opts.issue ?? await getIssue(issueId);
+  }, opts: { issue?: IssueRow; companyId?: string } = {}): Promise<ResolvedWorkspaceResource> {
+    const scope = await fileScope(issueId, opts);
+    const issue = scope.issue;
     const selector = input.workspace ?? "auto";
     const explicitTarget = Boolean(input.projectId || input.workspaceId);
     const isDirectoryRequest = input.path.trim().endsWith("/");
     const normalized = normalizeWorkspaceRelativePath(input.path);
-    const candidates = await listCandidates(issue, selector, input);
+    const candidates = await listCandidates(scope, selector, input);
     if (candidates.length === 0) {
       throw unprocessable("No workspace is available for this issue", { code: "no_workspace" });
     }
@@ -1531,7 +1555,7 @@ export function workspaceFileResourceService(db: Db, actor?: AuthorizationActor,
       }
     }
 
-    if (lastNotFound && !explicitTarget && selector === "auto") {
+    if (lastNotFound && issue && !explicitTarget && selector === "auto") {
       const discovered = await discoverUniqueProjectWorkspaceMatch(
         issue,
         new Set(candidates.map((candidate) => candidate.workspaceId)),
@@ -1550,9 +1574,10 @@ export function workspaceFileResourceService(db: Db, actor?: AuthorizationActor,
   async function list(
     issueId: string,
     input: WorkspaceFileListQueryInput = {},
-    opts: { issue?: IssueRow; scanContext?: WorkspaceFileScanContext } = {},
+    opts: { issue?: IssueRow; companyId?: string; scanContext?: WorkspaceFileScanContext } = {},
   ): Promise<WorkspaceFileListResponse> {
-    const issue = opts.issue ?? await getIssue(issueId);
+    const scope = await fileScope(issueId, opts);
+    const issue = scope.issue;
     const selector = input.workspace ?? "auto";
     const explicitTarget = Boolean(input.projectId || input.workspaceId);
     const normalizedPath = input.path?.trim() ? normalizeWorkspaceRelativePath(input.path) : null;
@@ -1564,7 +1589,7 @@ export function workspaceFileResourceService(db: Db, actor?: AuthorizationActor,
     const offset = Math.max(0, Math.floor(input.offset ?? 0));
     const q = input.q?.trim() || null;
     const normalizedQuery = q?.toLowerCase() ?? null;
-    const candidates = await listCandidates(issue, selector, input);
+    const candidates = await listCandidates(scope, selector, input);
     if (candidates.length === 0) {
       return unavailableFileList({ selector, mode, path: normalizedPath?.relativePath ?? null, q, limit, offset, reason: "no_workspace" });
     }
@@ -1725,7 +1750,7 @@ export function workspaceFileResourceService(db: Db, actor?: AuthorizationActor,
       });
     }
 
-    if (lastNotFound && normalizedPath && !explicitTarget && selector === "auto") {
+    if (lastNotFound && issue && normalizedPath && !explicitTarget && selector === "auto") {
       const discovered = await discoverUniqueProjectWorkspaceMatch(
         issue,
         new Set(candidates.map((candidate) => candidate.workspaceId)),
@@ -1793,12 +1818,13 @@ export function workspaceFileResourceService(db: Db, actor?: AuthorizationActor,
     workspace?: WorkspaceFileSelector | null;
     projectId?: string | null;
     workspaceId?: string | null;
-  }, opts: { issue?: IssueRow } = {}): Promise<WorkspaceFileContent> {
-    const issue = opts.issue ?? await getIssue(issueId);
+  }, opts: { issue?: IssueRow; companyId?: string } = {}): Promise<WorkspaceFileContent> {
+    const scope = await fileScope(issueId, opts);
+    const issue = scope.issue;
     const selector = input.workspace ?? "auto";
     const explicitTarget = Boolean(input.projectId || input.workspaceId);
     const normalized = normalizeWorkspaceRelativePath(input.path);
-    const candidates = await listCandidates(issue, selector, input);
+    const candidates = await listCandidates(scope, selector, input);
     if (candidates.length === 0) {
       throw unprocessable("No workspace is available for this issue", { code: "no_workspace" });
     }
@@ -1859,7 +1885,7 @@ export function workspaceFileResourceService(db: Db, actor?: AuthorizationActor,
       };
     }
 
-    if (lastNotFound && !explicitTarget && selector === "auto") {
+    if (lastNotFound && issue && !explicitTarget && selector === "auto") {
       const discovered = await discoverUniqueProjectWorkspaceMatch(
         issue,
         new Set(candidates.map((candidate) => candidate.workspaceId)),
@@ -1896,12 +1922,13 @@ export function workspaceFileResourceService(db: Db, actor?: AuthorizationActor,
     workspace?: WorkspaceFileSelector | null;
     projectId?: string | null;
     workspaceId?: string | null;
-  }, opts: { issue?: IssueRow } = {}): Promise<PreparedWorkspaceFileDownload> {
-    const issue = opts.issue ?? await getIssue(issueId);
+  }, opts: { issue?: IssueRow; companyId?: string } = {}): Promise<PreparedWorkspaceFileDownload> {
+    const scope = await fileScope(issueId, opts);
+    const issue = scope.issue;
     const selector = input.workspace ?? "auto";
     const explicitTarget = Boolean(input.projectId || input.workspaceId);
     const normalized = normalizeWorkspaceRelativePath(input.path);
-    const candidates = await listCandidates(issue, selector, input);
+    const candidates = await listCandidates(scope, selector, input);
     if (candidates.length === 0) {
       throw unprocessable("No workspace is available for this issue", { code: "no_workspace" });
     }
@@ -1940,7 +1967,7 @@ export function workspaceFileResourceService(db: Db, actor?: AuthorizationActor,
       }
     }
 
-    if (lastNotFound && !explicitTarget && selector === "auto") {
+    if (lastNotFound && issue && !explicitTarget && selector === "auto") {
       const discovered = await discoverUniqueProjectWorkspaceMatch(
         issue,
         new Set(candidates.map((candidate) => candidate.workspaceId)),
@@ -1954,6 +1981,31 @@ export function workspaceFileResourceService(db: Db, actor?: AuthorizationActor,
     throw unprocessable("No local-readable workspace is available for this issue", { code: "no_local_workspace" });
   }
 
+  function projectTargetQuery(target: ProjectWorkspaceFileTarget) {
+    return { workspace: "project" as const, projectId: target.projectId, workspaceId: target.workspaceId };
+  }
+
+  /** Project-scoped reads (project "Code" tab): the explicit workspace is the only candidate. */
+  function listForProjectWorkspace(
+    target: ProjectWorkspaceFileTarget,
+    input: Omit<WorkspaceFileListQueryInput, "workspace" | "projectId" | "workspaceId"> = {},
+    opts: { scanContext?: WorkspaceFileScanContext } = {},
+  ) {
+    return list("", { ...input, ...projectTargetQuery(target) }, { ...opts, companyId: target.companyId });
+  }
+
+  function resolveForProjectWorkspace(target: ProjectWorkspaceFileTarget, input: { path: string }) {
+    return resolve("", { path: input.path, ...projectTargetQuery(target) }, { companyId: target.companyId });
+  }
+
+  function readContentForProjectWorkspace(target: ProjectWorkspaceFileTarget, input: { path: string }) {
+    return readContent("", { path: input.path, ...projectTargetQuery(target) }, { companyId: target.companyId });
+  }
+
+  function prepareDownloadForProjectWorkspace(target: ProjectWorkspaceFileTarget, input: { path: string }) {
+    return prepareDownload("", { path: input.path, ...projectTargetQuery(target) }, { companyId: target.companyId });
+  }
+
   return {
     getIssue,
     availability,
@@ -1961,5 +2013,9 @@ export function workspaceFileResourceService(db: Db, actor?: AuthorizationActor,
     resolve,
     readContent,
     prepareDownload,
+    listForProjectWorkspace,
+    resolveForProjectWorkspace,
+    readContentForProjectWorkspace,
+    prepareDownloadForProjectWorkspace,
   };
 }
