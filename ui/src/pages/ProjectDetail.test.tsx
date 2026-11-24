@@ -108,6 +108,9 @@ vi.mock("../components/PageTabBar", () => ({
     <div>{items.map((item) => <button key={item.value}>{item.label}</button>)}</div>
   ),
 }));
+vi.mock("../components/project-code/ProjectCodeTab", () => ({
+  ProjectCodeTab: ({ projectId }: { projectId: string }) => <div data-testid="project-code-tab">Code for {projectId}</div>,
+}));
 vi.mock("../components/IssuesList", () => ({
   IssuesList: (props: unknown) => {
     mockIssuesList(props);
@@ -294,6 +297,18 @@ describe("ProjectDetail", () => {
       projectId: "project-1",
       originKindPrefix: "plugin:paperclip.missions",
     });
+  });
+
+  it("offers a Code tab right after Tasks and opens it from the /code path", async () => {
+    mockLocation.pathname = "/projects/project-1/code";
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    root = createRoot(container);
+    await act(() => root!.render(<QueryClientProvider client={queryClient}><ProjectDetail /></QueryClientProvider>));
+    await settle();
+    const labels = [...container.querySelectorAll("button")].map((button) => button.textContent);
+    expect(labels.indexOf("Code")).toBe(labels.indexOf("Tasks") + 1);
+    expect(container.querySelector('[data-testid="project-code-tab"]')?.textContent).toBe("Code for project-1");
+    queryClient.clear();
   });
 
   it("keeps Timeline out of the project task-list controls", async () => {
