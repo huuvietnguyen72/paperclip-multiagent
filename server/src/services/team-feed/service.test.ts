@@ -3,7 +3,7 @@ import {
   activityLog, agents, companies, createDb, EMBEDDED_POSTGRES_TEST_TIMEOUT_MS, heartbeatRunChanges, heartbeatRuns,
   issueComments, issues, type Db,
 } from "@paperclipai/db";
-import { ne, sql } from "drizzle-orm";
+import { sql } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { resolveExternalTestDatabaseUrl } from "../../__tests__/helpers/external-test-database.js";
 import { getEmbeddedPostgresTestSupport, startEmbeddedPostgresTestDatabase } from "../../__tests__/helpers/embedded-postgres.js";
@@ -115,7 +115,7 @@ describePostgres("team feed service", () => {
   });
 
   it("hides tasks the reader cannot open and still fills the page", async () => {
-    const { items } = await service().list({ companyId, readCondition: ne(issues.id, privateIssueId), limit: 2 });
+    const { items } = await service().list({ companyId, readCondition: sql<boolean>`${issues.id} <> ${privateIssueId}`, limit: 2 });
     expect(items.map((item) => item.id)).toEqual([ids.done, ids.inReview]);
   });
 
