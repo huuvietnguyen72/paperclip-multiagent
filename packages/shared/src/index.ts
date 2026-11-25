@@ -2798,6 +2798,7 @@ export * from "./ai-connection-router.js";
 export * from "./model-fallback.js";
 export * from "./run-changes.js";
 export * from "./project-code-view.js";
+export * from "./team-feed.js";
 export * from "./ai-connection-usage.js";
 export * from "./subscriptions.js";
 export * from "./types/email.js";
