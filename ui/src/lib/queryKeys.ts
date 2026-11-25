@@ -533,6 +533,7 @@ export const queryKeys = {
     codeFile: (projectId: string, workspaceId: string, path: string, kind: "resolve" | "content") =>
       ["projects", "code-files", projectId, workspaceId, kind, path] as const,
   },
+  teamFeed: (companyId: string) => ["team-feed", companyId] as const,
   cases: {
     handoffs: (id: string) => ["cases", "handoffs", id] as const,
     list: (companyId: string) => ["cases", companyId] as const,

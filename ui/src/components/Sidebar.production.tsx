@@ -21,8 +21,7 @@ import {
   Unplug,
   MessagesSquare,
   GanttChartSquare,
-  LayoutGrid,
-} from "lucide-react";
+  LayoutGrid, Newspaper } from "lucide-react";
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { SidebarSection } from "./SidebarSection";
@@ -163,6 +162,7 @@ export function Sidebar() {
             badgeTone={inboxBadge.failedRuns > 0 ? "danger" : "default"}
             alert={inboxBadge.failedRuns > 0}
           />
+          <SidebarNavItem to="/team-feed" label="Team feed" icon={Newspaper} />
           {showDecisions ? (
             <SidebarNavItem
               to="/decisions"

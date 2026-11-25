@@ -357,6 +357,19 @@ describe("Sidebar", () => {
     });
   });
 
+  it("shows a Team feed row right after Inbox", async () => {
+    const root = await renderSidebar();
+    const hrefs = [...container.querySelectorAll("a")].map((anchor) => anchor.getAttribute("href"));
+    expect(hrefs).toContain("/team-feed");
+    expect(hrefs.indexOf("/team-feed")).toBe(hrefs.indexOf("/inbox") + 1);
+    const link = [...container.querySelectorAll("a")].find((anchor) => anchor.getAttribute("href") === "/team-feed");
+    expect(link?.textContent).toContain("Team feed");
+
+    flushSync(() => {
+      root.unmount();
+    });
+  });
+
   it("keeps the Inbox row, Workspaces and no chat surfaces while both PAP-670 flags are off", async () => {
     mockInstanceSettingsApi.getExperimental.mockResolvedValue({ enableIsolatedWorkspaces: true });
     const root = await renderSidebar();

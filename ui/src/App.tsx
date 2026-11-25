@@ -95,6 +95,7 @@ const CompanyActivity = lazy(() => import("./pages/audit/CompanyActivity").then(
 const AuditHub = lazy(() => import("./pages/audit/AuditHub").then((module) => ({ default: module.AuditHub })));
 const Costs = lazy(() => import("./pages/Costs").then((module) => ({ default: module.Costs })));
 const WhatNeedsMe = lazy(() => import("./pages/WhatNeedsMe").then((module) => ({ default: module.WhatNeedsMe })));
+const TeamFeed = lazy(() => import("./pages/TeamFeed").then((module) => ({ default: module.TeamFeed })));
 const DecisionQueuePage = lazy(() => import("./pages/DecisionQueuePage").then((module) => ({ default: module.DecisionQueuePage })));
 const BoardChat = lazy(() => import("./pages/BoardChat").then((module) => ({ default: module.BoardChat })));
 const CompanySettings = lazy(() => import("./pages/CompanySettings").then((module) => ({ default: module.CompanySettings })));
@@ -416,6 +417,7 @@ function boardRoutes(streamlinedUiEnabled: boolean, combinedInboxTasksEnabled: b
         <Route path="dev/task-chat-lab" element={<TaskChatLab />} />
       ) : null}
       <Route path="decisions" element={<WhatNeedsMe />} />
+      <Route path="team-feed" element={<TeamFeed />} />
       <Route path="decisions/queues/:key" element={<DecisionQueuePage />} />
       {/* Combined Inbox + Task List: Inbox is a view inside Tasks. Every /inbox/* URL still
           resolves — it redirects into the matching view — and with the flag off

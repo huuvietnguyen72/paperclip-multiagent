@@ -25,8 +25,7 @@ import {
   MessageCircle,
   GanttChartSquare,
   LayoutGrid,
-  Users,
-} from "lucide-react";
+  Users, Newspaper } from "lucide-react";
 import { useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { SidebarSection } from "./SidebarSection";
@@ -197,6 +196,7 @@ function ClassicSidebar({ children }: { children?: ReactNode }) {
               alert={inboxBadge.failedRuns > 0}
             />
           ) : null}
+          <SidebarNavItem to="/team-feed" label="Team feed" icon={Newspaper} />
           {agentChatEnabled && !chatRail ? <SidebarNavItem to="/chats" label="Chat" icon={MessageCircle} badge={unreadChatCount} badgeLabel="unread chats" /> : null}
           {showDecisions ? (
             <SidebarNavItem
