@@ -1,0 +1,17 @@
+# systemd user service chạy cost-watcher nền.
+# Cài:   cp multiagent/tools/paperclip-cost-watcher.service ~/.config/systemd/user/
+#        systemctl --user daemon-reload && systemctl --user enable --now paperclip-cost-watcher
+# Sửa hai đường dẫn dưới đây cho khớp máy của bạn (node của nvm và thư mục repo). %h là thư mục home.
+[Unit]
+Description=Paperclip cost watcher (records usage of runs whose provider receipt never arrives)
+After=network.target
+
+[Service]
+ExecStart=%h/.nvm/versions/node/v24.22.2/bin/node %h/paperclip/multiagent/tools/cost-watcher.mjs
+Restart=always
+RestartSec=10
+StandardOutput=append:%h/paperclip-cost-watcher.log
+StandardError=append:%h/paperclip-cost-watcher.log
+
+[Install]
+WantedBy=default.target
